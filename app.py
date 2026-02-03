@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Western Blot Quantifier v3.0 - Web App
-プロファイルベース測定（ImageJ方式）
+Western Blot Quantifier v4.0 - Web App
+改良版: 固定バンド領域 + ローカル背景補正
 """
 
 import streamlit as st
@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
-from scipy.signal import find_peaks
 from scipy.ndimage import gaussian_filter1d
 
 
@@ -30,102 +29,67 @@ def load_image(uploaded_file):
     return img_bgr, gray
 
 
-def find_band_region(lane_profile, min_height_ratio=0.1):
-    """プロファイルからバンド領域を検出"""
-    # スムージング
-    smoothed = gaussian_filter1d(lane_profile, sigma=3)
+def find_band_region(gray):
+    """画像全体からバンド領域のY範囲を検出"""
+    h, w = gray.shape
     
-    # 背景補正（ローリングボール的な処理）
-    # 上下10%を背景とみなす
-    n = len(smoothed)
-    bg_top = np.mean(smoothed[:max(1, int(n*0.1))])
-    bg_bottom = np.mean(smoothed[int(n*0.9):])
-    bg = (bg_top + bg_bottom) / 2
+    # 縦方向プロファイル
+    profile = np.mean(gray, axis=1)
+    smoothed = gaussian_filter1d(profile, sigma=2)
     
-    # 反転（暗い=高シグナル）
-    inverted = 255 - smoothed
-    baseline = 255 - bg
-    corrected = np.maximum(inverted - baseline * 0.8, 0)
+    # 最も暗い行（バンドの中心）
+    min_row = np.argmin(smoothed)
+    min_val = smoothed[min_row]
+    max_val = smoothed.max()
     
-    # ピーク検出
-    max_val = np.max(corrected)
-    if max_val < 5:  # シグナルなし
-        return None, None, corrected
+    # バンド領域の閾値
+    threshold = min_val + (max_val - min_val) * 0.5
     
-    min_height = max_val * min_height_ratio
-    peaks, properties = find_peaks(corrected, height=min_height, distance=10)
+    # 上端を探す
+    top = min_row
+    while top > 0 and smoothed[top] < threshold:
+        top -= 1
     
-    if len(peaks) == 0:
-        # ピークがなければ最大値の位置を使用
-        peak_pos = np.argmax(corrected)
-    else:
-        # 最も高いピーク
-        peak_pos = peaks[np.argmax(properties['peak_heights'])]
+    # 下端を探す
+    bottom = min_row
+    while bottom < h - 1 and smoothed[bottom] < threshold:
+        bottom += 1
     
-    # ピーク周辺のバンド領域を決定（半値幅ベース）
-    peak_height = corrected[peak_pos]
-    half_height = peak_height / 2
+    # 余裕を持たせる
+    margin = max(3, (bottom - top) // 3)
+    top = max(0, top - margin)
+    bottom = min(h - 1, bottom + margin)
     
-    # 左端を探す
-    left = peak_pos
-    while left > 0 and corrected[left] > half_height * 0.3:
-        left -= 1
-    
-    # 右端を探す
-    right = peak_pos
-    while right < len(corrected) - 1 and corrected[right] > half_height * 0.3:
-        right += 1
-    
-    # 少し余裕を持たせる
-    margin = max(5, (right - left) // 4)
-    left = max(0, left - margin)
-    right = min(len(corrected) - 1, right + margin)
-    
-    return left, right, corrected
+    return top, bottom
 
 
-def measure_lane_profile(lane_gray):
-    """レーンをプロファイルベースで測定"""
+def measure_lane(lane_gray, band_top, band_bottom):
+    """レーンの強度を測定"""
     h, w = lane_gray.shape
     
-    # 縦方向プロファイル（各行の平均強度）
-    profile = np.mean(lane_gray, axis=1)
+    # バンド領域を切り出し
+    band_region = lane_gray[band_top:band_bottom, :]
     
-    # バンド領域検出
-    top, bottom, corrected_profile = find_band_region(profile)
+    # ローカル背景（上位10%パーセンタイル = 最も明るい部分）
+    local_bg = np.percentile(band_region, 90)
     
-    if top is None:
-        # バンドなし - 中央領域で計算
-        top = int(h * 0.3)
-        bottom = int(h * 0.7)
+    # 反転して積分
+    inverted = local_bg - band_region.astype(np.float64)
+    inverted = np.maximum(inverted, 0)
     
-    # Volume計算（補正済みプロファイルの積分）
-    volume = np.sum(corrected_profile[top:bottom+1]) * w
+    volume = np.sum(inverted)
+    mean_intensity = np.mean(inverted)
     
-    # 平均強度
-    mean_intensity = np.mean(corrected_profile[top:bottom+1])
-    
-    # バンド中心
-    if np.sum(corrected_profile[top:bottom+1]) > 0:
-        weights = corrected_profile[top:bottom+1]
-        center_y = top + np.sum(np.arange(len(weights)) * weights) / np.sum(weights)
-    else:
-        center_y = (top + bottom) / 2
-    
-    return {
-        'volume': volume,
-        'mean': mean_intensity,
-        'top': top,
-        'bottom': bottom,
-        'center_y': int(center_y),
-        'profile': corrected_profile
-    }
+    return volume, mean_intensity
 
 
 def process_image(img, gray, num_lanes, exclude_last=False):
     """画像を処理"""
     h, w = gray.shape
     lane_width = w // num_lanes
+    
+    # バンド領域を検出
+    band_top, band_bottom = find_band_region(gray)
     
     results = []
     lane_data = []
@@ -137,102 +101,77 @@ def process_image(img, gray, num_lanes, exclude_last=False):
         x_end = (i + 1) * lane_width if i < num_lanes - 1 else w
         
         lane_gray = gray[:, x_start:x_end]
-        
-        # プロファイルベース測定
-        measurement = measure_lane_profile(lane_gray)
+        volume, mean_int = measure_lane(lane_gray, band_top, band_bottom)
         
         results.append({
             'Lane': i + 1,
-            'Volume': round(measurement['volume'], 0),
-            'Mean': round(measurement['mean'], 2),
+            'Volume': round(volume, 0),
+            'Mean': round(mean_int, 2),
         })
         
         lane_data.append({
             'x_start': x_start,
             'x_end': x_end,
-            'top': measurement['top'],
-            'bottom': measurement['bottom'],
-            'center_y': measurement['center_y'],
-            'profile': measurement['profile']
         })
     
-    return results, lane_data
+    return results, lane_data, band_top, band_bottom
 
 
-def create_overlay(img, gray, lane_data, num_lanes):
+def create_overlay(img, gray, lane_data, num_lanes, band_top, band_bottom):
     """検出結果のオーバーレイを作成"""
     h, w = gray.shape
     lane_width = w // num_lanes
     
     overlay = img.copy()
     
+    # バンド領域の横線
+    cv2.line(overlay, (0, band_top), (w, band_top), (0, 255, 0), 1)
+    cv2.line(overlay, (0, band_bottom), (w, band_bottom), (0, 255, 0), 1)
+    
     # レーン境界線
     for i in range(num_lanes + 1):
         x = i * lane_width
         cv2.line(overlay, (x, 0), (x, h), (255, 0, 0), 1)
     
-    # バンド領域（矩形ROI）
+    # レーン番号とROI
     for i, ld in enumerate(lane_data):
         # ROI矩形
-        pt1 = (ld['x_start'] + 2, ld['top'])
-        pt2 = (ld['x_end'] - 2, ld['bottom'])
+        pt1 = (ld['x_start'] + 2, band_top)
+        pt2 = (ld['x_end'] - 2, band_bottom)
         cv2.rectangle(overlay, pt1, pt2, (0, 255, 0), 2)
         
-        # レーン番号
         cx = (ld['x_start'] + ld['x_end']) // 2
-        cv2.putText(overlay, str(i + 1), (cx - 10, 25),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        cv2.putText(overlay, str(i + 1), (cx - 10, 20),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
     
     return overlay
 
 
-def create_plot(df, lane_data):
-    """棒グラフとプロファイルを作成"""
-    n_lanes = len(lane_data)
-    
-    fig = plt.figure(figsize=(14, 8))
-    
-    # 上段: 棒グラフ
-    ax1 = fig.add_subplot(2, 2, 1)
-    ax2 = fig.add_subplot(2, 2, 2)
+def create_plot(df):
+    """棒グラフを作成"""
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
     
     colors = plt.cm.viridis(df['Relative_%'] / 100)
     
     # Volume
-    ax1.bar(df['Lane'], df['Volume'], color=colors, edgecolor='black')
-    ax1.set_title('Band Volume', fontweight='bold')
-    ax1.set_xlabel('Lane')
-    ax1.set_ylabel('Volume')
-    ax1.grid(axis='y', alpha=0.3)
+    axes[0].bar(df['Lane'], df['Volume'], color=colors, edgecolor='black')
+    axes[0].set_title('Band Volume', fontweight='bold')
+    axes[0].set_xlabel('Lane')
+    axes[0].set_ylabel('Volume')
+    axes[0].grid(axis='y', alpha=0.3)
     
     # Relative %
-    bars = ax2.bar(df['Lane'], df['Relative_%'], color=colors, edgecolor='black')
-    ax2.set_title('Relative Intensity (%)', fontweight='bold')
-    ax2.set_xlabel('Lane')
-    ax2.set_ylabel('Relative %')
-    ax2.set_ylim(0, 115)
-    ax2.axhline(y=100, color='red', linestyle='--', alpha=0.5)
-    ax2.grid(axis='y', alpha=0.3)
+    bars = axes[1].bar(df['Lane'], df['Relative_%'], color=colors, edgecolor='black')
+    axes[1].set_title('Relative Intensity (%)', fontweight='bold')
+    axes[1].set_xlabel('Lane')
+    axes[1].set_ylabel('Relative %')
+    axes[1].set_ylim(0, 115)
+    axes[1].axhline(y=100, color='red', linestyle='--', alpha=0.5)
+    axes[1].grid(axis='y', alpha=0.3)
     
     for bar, rel in zip(bars, df['Relative_%']):
-        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
-                f'{rel:.1f}%', ha='center', va='bottom', fontsize=8)
-    
-    # 下段: プロファイル
-    ax3 = fig.add_subplot(2, 1, 2)
-    
-    for i, ld in enumerate(lane_data):
-        profile = ld['profile']
-        x = np.arange(len(profile))
-        ax3.plot(x, profile, label=f'Lane {i+1}', alpha=0.7)
-        # バンド領域をハイライト
-        ax3.axvspan(ld['top'], ld['bottom'], alpha=0.1)
-    
-    ax3.set_title('Lane Profiles (Corrected)', fontweight='bold')
-    ax3.set_xlabel('Position (pixels)')
-    ax3.set_ylabel('Intensity')
-    ax3.legend(loc='upper right', ncol=min(6, n_lanes), fontsize=8)
-    ax3.grid(alpha=0.3)
+        axes[1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
+                    f'{rel:.1f}%', ha='center', va='bottom', fontsize=8)
     
     plt.tight_layout()
     return fig
@@ -249,7 +188,7 @@ st.set_page_config(
 )
 
 st.title("🧬 Western Blot Quantifier")
-st.markdown("プロファイルベース測定（ImageJ方式）")
+st.markdown("バンド自動検出 + ローカル背景補正")
 
 # サイドバー
 with st.sidebar:
@@ -264,6 +203,14 @@ with st.sidebar:
     1. 画像をアップロード
     2. レーン数を設定
     3. 「定量化」ボタンをクリック
+    """)
+    
+    st.markdown("---")
+    st.markdown("### ℹ️ アルゴリズム")
+    st.markdown("""
+    - バンド領域を自動検出
+    - 各レーンで背景補正
+    - 強度を積分してVolume計算
     """)
     
     st.markdown("---")
@@ -284,24 +231,27 @@ if uploaded_file is not None:
     
     if st.button("🔬 定量化を実行", type="primary", use_container_width=True):
         with st.spinner("処理中..."):
-            results, lane_data = process_image(img, gray, num_lanes, exclude_last)
+            results, lane_data, band_top, band_bottom = process_image(
+                img, gray, num_lanes, exclude_last
+            )
             
             df = pd.DataFrame(results)
             max_volume = df['Volume'].max()
             df['Relative_%'] = (df['Volume'] / max_volume * 100).round(2) if max_volume > 0 else 0
             
-            overlay = create_overlay(img, gray, lane_data, num_lanes)
+            overlay = create_overlay(img, gray, lane_data, num_lanes, band_top, band_bottom)
             overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
         
         with col2:
             st.subheader("🎯 検出結果")
             st.image(overlay_rgb, use_container_width=True)
+            st.caption(f"バンド領域: Y = {band_top} ~ {band_bottom}")
         
         st.markdown("---")
         
         # グラフ
         st.subheader("📊 定量結果")
-        fig = create_plot(df, lane_data)
+        fig = create_plot(df)
         st.pyplot(fig)
         
         # データテーブル
@@ -326,8 +276,8 @@ else:
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("#### 📈 プロファイルベース")
-        st.markdown("ImageJと同じ方式で安定した測定")
+        st.markdown("#### 🎯 自動検出")
+        st.markdown("バンド領域を自動で検出")
     
     with col2:
         st.markdown("#### 📊 即座に結果")
