@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Western Blot Quantifier - Web App
-Streamlitで動くWebアプリ版
+Western Blot Quantifier v2.0 - Web App
+レーンベース検出 + 強化ノイズフィルタリング
 """
 
 import streamlit as st
@@ -11,8 +11,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
-import io
-import base64
+from scipy.ndimage import gaussian_filter1d
 
 
 def load_image(uploaded_file):
@@ -31,21 +30,51 @@ def load_image(uploaded_file):
     return img_bgr, gray
 
 
-def detect_band_in_lane(lane_gray):
-    """レーン内のバンドを検出"""
+def denoise_lane(lane_gray):
+    """強力なノイズ除去"""
+    # バイラテラルフィルタ（エッジを保持しながらノイズ除去）
+    denoised = cv2.bilateralFilter(lane_gray, 9, 75, 75)
+    # メディアンフィルタ（salt-and-pepperノイズ除去）
+    denoised = cv2.medianBlur(denoised, 3)
+    return denoised
+
+
+def detect_band_in_lane(lane_gray, sensitivity=1.5):
+    """レーン内のバンドを検出（v3.2ベースの強化版）"""
     h, w = lane_gray.shape
     
-    # ノイズ除去
-    denoised = cv2.bilateralFilter(lane_gray, 5, 50, 50)
-    blurred = cv2.GaussianBlur(denoised, (3, 3), 0)
+    # 強力なノイズ除去
+    denoised = denoise_lane(lane_gray)
     
-    # Otsu's threshold
-    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    # CLAHE（コントラスト強調）
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(denoised)
     
-    # モルフォロジー
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+    # ガウシアンブラー
+    blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
+    
+    # Otsu's threshold（メイン）
+    _, binary_otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    
+    # Adaptive threshold（補助）
+    block_size = max(11, int(41 * sensitivity)) | 1
+    c_value = max(3, int(10 / sensitivity))
+    binary_adaptive = cv2.adaptiveThreshold(
+        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV, block_size, c_value
+    )
+    
+    # 両方のAND（確実なバンドのみ）
+    binary = cv2.bitwise_and(binary_otsu, binary_adaptive)
+    
+    # モルフォロジー（ノイズ除去強化）
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    
+    # オープニング（小さいノイズ除去）
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open)
+    # クロージング（バンド内の穴を埋める）
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close)
     
     # 輪郭検出
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -53,10 +82,37 @@ def detect_band_in_lane(lane_gray):
     if not contours:
         return None, binary
     
-    largest_contour = max(contours, key=cv2.contourArea)
+    # 形状フィルタリング
+    valid_contours = []
+    min_area = h * w * 0.005  # 最小面積
+    max_area = h * w * 0.8    # 最大面積
     
-    if cv2.contourArea(largest_contour) < h * w * 0.01:
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < min_area or area > max_area:
+            continue
+        
+        x, y, cw, ch = cv2.boundingRect(contour)
+        aspect_ratio = cw / ch if ch > 0 else 0
+        
+        # バンドは横長〜正方形（縦長すぎは除外）
+        if aspect_ratio < 0.3:
+            continue
+        
+        # Solidity（凸包充填率）
+        hull = cv2.convexHull(contour)
+        hull_area = cv2.contourArea(hull)
+        solidity = area / hull_area if hull_area > 0 else 0
+        if solidity < 0.3:
+            continue
+        
+        valid_contours.append((contour, area))
+    
+    if not valid_contours:
         return None, binary
+    
+    # 最大の有効輪郭を選択
+    largest_contour = max(valid_contours, key=lambda x: x[1])[0]
     
     return largest_contour, binary
 
@@ -65,7 +121,7 @@ def measure_lane(lane_gray, contour=None):
     """レーンの強度を測定"""
     h, w = lane_gray.shape
     
-    # 背景推定
+    # 背景推定（上端と下端）
     bg_top = lane_gray[:max(1, int(h*0.1)), :].flatten()
     bg_bottom = lane_gray[int(h*0.9):, :].flatten()
     bg_intensity = np.median(np.concatenate([bg_top, bg_bottom]))
@@ -81,14 +137,19 @@ def measure_lane(lane_gray, contour=None):
         else:
             x, y, bw, bh = cv2.boundingRect(contour)
             cy = y + bh // 2
+        
+        area = cv2.contourArea(contour)
     else:
+        # バンドが検出されなかった場合、中央領域を使用
         band_region = lane_gray[int(h*0.2):int(h*0.8), :]
         band_pixels = band_region.flatten()
         cy = h // 2
+        area = 0
     
     if len(band_pixels) == 0:
         return 0, 0, cy, 0
     
+    # 強度計算（暗い = 高シグナル）
     inverted = 255 - band_pixels.astype(np.float64)
     bg_corrected_value = 255 - bg_intensity
     corrected = np.maximum(inverted - bg_corrected_value * 0.7, 0)
@@ -96,10 +157,10 @@ def measure_lane(lane_gray, contour=None):
     volume = np.sum(corrected)
     mean_intensity = np.mean(corrected)
     
-    return volume, mean_intensity, cy, len(band_pixels)
+    return volume, mean_intensity, cy, area
 
 
-def process_image(img, gray, num_lanes, exclude_last=False):
+def process_image(img, gray, num_lanes, exclude_last=False, sensitivity=1.5):
     """画像を処理"""
     h, w = gray.shape
     lane_width = w // num_lanes
@@ -115,7 +176,7 @@ def process_image(img, gray, num_lanes, exclude_last=False):
         
         lane_gray = gray[:, x_start:x_end]
         
-        contour, binary = detect_band_in_lane(lane_gray)
+        contour, binary = detect_band_in_lane(lane_gray, sensitivity)
         volume, mean_int, cy, area = measure_lane(lane_gray, contour)
         
         if contour is not None:
@@ -127,7 +188,8 @@ def process_image(img, gray, num_lanes, exclude_last=False):
         results.append({
             'Lane': i + 1,
             'Volume': round(volume, 0),
-            'Mean': round(mean_int, 2)
+            'Mean': round(mean_int, 2),
+            'Area': area
         })
         
         lane_data.append({
@@ -205,7 +267,7 @@ st.set_page_config(
 )
 
 st.title("🧬 Western Blot Quantifier")
-st.markdown("ウェスタンブロットのバンドを自動定量化")
+st.markdown("ウェスタンブロットのバンドを自動定量化（レーンベース検出）")
 
 # サイドバー
 with st.sidebar:
@@ -215,11 +277,18 @@ with st.sidebar:
     exclude_last = st.checkbox("最後のレーン（マーカー）を除外")
     
     st.markdown("---")
+    
+    st.markdown("### 🔧 詳細設定")
+    sensitivity = st.slider("検出感度", min_value=0.5, max_value=3.0, value=1.5, step=0.1,
+                           help="高い値 = より多くのバンドを検出（ノイズも増える可能性）")
+    
+    st.markdown("---")
     st.markdown("### 📖 使い方")
     st.markdown("""
     1. 画像をアップロード
     2. レーン数を設定
-    3. 「定量化」ボタンをクリック
+    3. 必要に応じて感度調整
+    4. 「定量化」ボタンをクリック
     """)
     
     st.markdown("---")
@@ -243,7 +312,7 @@ if uploaded_file is not None:
     if st.button("🔬 定量化を実行", type="primary", use_container_width=True):
         with st.spinner("処理中..."):
             # 処理
-            results, lane_data = process_image(img, gray, num_lanes, exclude_last)
+            results, lane_data = process_image(img, gray, num_lanes, exclude_last, sensitivity)
             
             # DataFrame
             df = pd.DataFrame(results)
@@ -267,10 +336,10 @@ if uploaded_file is not None:
         
         # データテーブル
         st.subheader("📋 データ")
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df[['Lane', 'Volume', 'Mean', 'Relative_%']], use_container_width=True)
         
         # CSVダウンロード
-        csv = df.to_csv(index=False).encode('utf-8-sig')
+        csv = df[['Lane', 'Volume', 'Mean', 'Area', 'Relative_%']].to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             label="📥 CSVをダウンロード",
             data=csv,
@@ -288,8 +357,8 @@ else:
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("#### 🔬 高精度検出")
-        st.markdown("OpenCVベースの画像処理でバンドを自動検出")
+        st.markdown("#### 🔬 レーンベース検出")
+        st.markdown("各レーン内で個別にバンドを検出、ノイズに強い")
     
     with col2:
         st.markdown("#### 📊 即座に結果")
@@ -297,4 +366,4 @@ else:
     
     with col3:
         st.markdown("#### 🔒 プライバシー")
-        st.markdown("データは送信されません（ローカル処理）")
+        st.markdown("データはサーバーに保存されません")
