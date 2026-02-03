@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Western Blot Quantifier v2.0 - Web App
-レーンベース検出 + 強化ノイズフィルタリング
+Western Blot Quantifier v3.0 - Web App
+プロファイルベース測定（ImageJ方式）
 """
 
 import streamlit as st
@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
+from scipy.signal import find_peaks
 from scipy.ndimage import gaussian_filter1d
 
 
@@ -19,7 +20,6 @@ def load_image(uploaded_file):
     image = Image.open(uploaded_file)
     img_array = np.array(image)
     
-    # グレースケールに変換
     if len(img_array.shape) == 3:
         gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
         img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
@@ -30,137 +30,99 @@ def load_image(uploaded_file):
     return img_bgr, gray
 
 
-def denoise_lane(lane_gray):
-    """強力なノイズ除去"""
-    # バイラテラルフィルタ（エッジを保持しながらノイズ除去）
-    denoised = cv2.bilateralFilter(lane_gray, 9, 75, 75)
-    # メディアンフィルタ（salt-and-pepperノイズ除去）
-    denoised = cv2.medianBlur(denoised, 3)
-    return denoised
-
-
-def detect_band_in_lane(lane_gray, sensitivity=1.5):
-    """レーン内のバンドを検出（v3.2ベースの強化版）"""
-    h, w = lane_gray.shape
+def find_band_region(lane_profile, min_height_ratio=0.1):
+    """プロファイルからバンド領域を検出"""
+    # スムージング
+    smoothed = gaussian_filter1d(lane_profile, sigma=3)
     
-    # 強力なノイズ除去
-    denoised = denoise_lane(lane_gray)
+    # 背景補正（ローリングボール的な処理）
+    # 上下10%を背景とみなす
+    n = len(smoothed)
+    bg_top = np.mean(smoothed[:max(1, int(n*0.1))])
+    bg_bottom = np.mean(smoothed[int(n*0.9):])
+    bg = (bg_top + bg_bottom) / 2
     
-    # CLAHE（コントラスト強調）
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(denoised)
+    # 反転（暗い=高シグナル）
+    inverted = 255 - smoothed
+    baseline = 255 - bg
+    corrected = np.maximum(inverted - baseline * 0.8, 0)
     
-    # ガウシアンブラー
-    blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
+    # ピーク検出
+    max_val = np.max(corrected)
+    if max_val < 5:  # シグナルなし
+        return None, None, corrected
     
-    # Otsu's threshold（メイン）
-    _, binary_otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    min_height = max_val * min_height_ratio
+    peaks, properties = find_peaks(corrected, height=min_height, distance=10)
     
-    # Adaptive threshold（補助）
-    block_size = max(11, int(41 * sensitivity)) | 1
-    c_value = max(3, int(10 / sensitivity))
-    binary_adaptive = cv2.adaptiveThreshold(
-        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV, block_size, c_value
-    )
-    
-    # 両方のAND（確実なバンドのみ）
-    binary = cv2.bitwise_and(binary_otsu, binary_adaptive)
-    
-    # モルフォロジー（ノイズ除去強化）
-    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    
-    # オープニング（小さいノイズ除去）
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open)
-    # クロージング（バンド内の穴を埋める）
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close)
-    
-    # 輪郭検出
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    if not contours:
-        return None, binary
-    
-    # 形状フィルタリング
-    valid_contours = []
-    min_area = h * w * 0.005  # 最小面積
-    max_area = h * w * 0.8    # 最大面積
-    
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area < min_area or area > max_area:
-            continue
-        
-        x, y, cw, ch = cv2.boundingRect(contour)
-        aspect_ratio = cw / ch if ch > 0 else 0
-        
-        # バンドは横長〜正方形（縦長すぎは除外）
-        if aspect_ratio < 0.3:
-            continue
-        
-        # Solidity（凸包充填率）
-        hull = cv2.convexHull(contour)
-        hull_area = cv2.contourArea(hull)
-        solidity = area / hull_area if hull_area > 0 else 0
-        if solidity < 0.3:
-            continue
-        
-        valid_contours.append((contour, area))
-    
-    if not valid_contours:
-        return None, binary
-    
-    # 最大の有効輪郭を選択
-    largest_contour = max(valid_contours, key=lambda x: x[1])[0]
-    
-    return largest_contour, binary
-
-
-def measure_lane(lane_gray, contour=None):
-    """レーンの強度を測定"""
-    h, w = lane_gray.shape
-    
-    # 背景推定（上端と下端）
-    bg_top = lane_gray[:max(1, int(h*0.1)), :].flatten()
-    bg_bottom = lane_gray[int(h*0.9):, :].flatten()
-    bg_intensity = np.median(np.concatenate([bg_top, bg_bottom]))
-    
-    if contour is not None:
-        mask = np.zeros(lane_gray.shape, dtype=np.uint8)
-        cv2.drawContours(mask, [contour], -1, 255, -1)
-        band_pixels = lane_gray[mask == 255]
-        
-        M = cv2.moments(contour)
-        if M["m00"] != 0:
-            cy = int(M["m01"] / M["m00"])
-        else:
-            x, y, bw, bh = cv2.boundingRect(contour)
-            cy = y + bh // 2
-        
-        area = cv2.contourArea(contour)
+    if len(peaks) == 0:
+        # ピークがなければ最大値の位置を使用
+        peak_pos = np.argmax(corrected)
     else:
-        # バンドが検出されなかった場合、中央領域を使用
-        band_region = lane_gray[int(h*0.2):int(h*0.8), :]
-        band_pixels = band_region.flatten()
-        cy = h // 2
-        area = 0
+        # 最も高いピーク
+        peak_pos = peaks[np.argmax(properties['peak_heights'])]
     
-    if len(band_pixels) == 0:
-        return 0, 0, cy, 0
+    # ピーク周辺のバンド領域を決定（半値幅ベース）
+    peak_height = corrected[peak_pos]
+    half_height = peak_height / 2
     
-    # 強度計算（暗い = 高シグナル）
-    inverted = 255 - band_pixels.astype(np.float64)
-    bg_corrected_value = 255 - bg_intensity
-    corrected = np.maximum(inverted - bg_corrected_value * 0.7, 0)
+    # 左端を探す
+    left = peak_pos
+    while left > 0 and corrected[left] > half_height * 0.3:
+        left -= 1
     
-    volume = np.sum(corrected)
-    mean_intensity = np.mean(corrected)
+    # 右端を探す
+    right = peak_pos
+    while right < len(corrected) - 1 and corrected[right] > half_height * 0.3:
+        right += 1
     
-    return volume, mean_intensity, cy, area
+    # 少し余裕を持たせる
+    margin = max(5, (right - left) // 4)
+    left = max(0, left - margin)
+    right = min(len(corrected) - 1, right + margin)
+    
+    return left, right, corrected
 
 
-def process_image(img, gray, num_lanes, exclude_last=False, sensitivity=1.5):
+def measure_lane_profile(lane_gray):
+    """レーンをプロファイルベースで測定"""
+    h, w = lane_gray.shape
+    
+    # 縦方向プロファイル（各行の平均強度）
+    profile = np.mean(lane_gray, axis=1)
+    
+    # バンド領域検出
+    top, bottom, corrected_profile = find_band_region(profile)
+    
+    if top is None:
+        # バンドなし - 中央領域で計算
+        top = int(h * 0.3)
+        bottom = int(h * 0.7)
+    
+    # Volume計算（補正済みプロファイルの積分）
+    volume = np.sum(corrected_profile[top:bottom+1]) * w
+    
+    # 平均強度
+    mean_intensity = np.mean(corrected_profile[top:bottom+1])
+    
+    # バンド中心
+    if np.sum(corrected_profile[top:bottom+1]) > 0:
+        weights = corrected_profile[top:bottom+1]
+        center_y = top + np.sum(np.arange(len(weights)) * weights) / np.sum(weights)
+    else:
+        center_y = (top + bottom) / 2
+    
+    return {
+        'volume': volume,
+        'mean': mean_intensity,
+        'top': top,
+        'bottom': bottom,
+        'center_y': int(center_y),
+        'profile': corrected_profile
+    }
+
+
+def process_image(img, gray, num_lanes, exclude_last=False):
     """画像を処理"""
     h, w = gray.shape
     lane_width = w // num_lanes
@@ -176,27 +138,22 @@ def process_image(img, gray, num_lanes, exclude_last=False, sensitivity=1.5):
         
         lane_gray = gray[:, x_start:x_end]
         
-        contour, binary = detect_band_in_lane(lane_gray, sensitivity)
-        volume, mean_int, cy, area = measure_lane(lane_gray, contour)
-        
-        if contour is not None:
-            contour_global = contour.copy()
-            contour_global[:, :, 0] += x_start
-        else:
-            contour_global = None
+        # プロファイルベース測定
+        measurement = measure_lane_profile(lane_gray)
         
         results.append({
             'Lane': i + 1,
-            'Volume': round(volume, 0),
-            'Mean': round(mean_int, 2),
-            'Area': area
+            'Volume': round(measurement['volume'], 0),
+            'Mean': round(measurement['mean'], 2),
         })
         
         lane_data.append({
-            'contour': contour_global,
-            'binary': binary,
             'x_start': x_start,
-            'x_end': x_end
+            'x_end': x_end,
+            'top': measurement['top'],
+            'bottom': measurement['bottom'],
+            'center_y': measurement['center_y'],
+            'profile': measurement['profile']
         })
     
     return results, lane_data
@@ -214,11 +171,14 @@ def create_overlay(img, gray, lane_data, num_lanes):
         x = i * lane_width
         cv2.line(overlay, (x, 0), (x, h), (255, 0, 0), 1)
     
-    # バンド輪郭
+    # バンド領域（矩形ROI）
     for i, ld in enumerate(lane_data):
-        if ld['contour'] is not None:
-            cv2.drawContours(overlay, [ld['contour']], -1, (0, 255, 0), 2)
+        # ROI矩形
+        pt1 = (ld['x_start'] + 2, ld['top'])
+        pt2 = (ld['x_end'] - 2, ld['bottom'])
+        cv2.rectangle(overlay, pt1, pt2, (0, 255, 0), 2)
         
+        # レーン番号
         cx = (ld['x_start'] + ld['x_end']) // 2
         cv2.putText(overlay, str(i + 1), (cx - 10, 25),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
@@ -226,31 +186,53 @@ def create_overlay(img, gray, lane_data, num_lanes):
     return overlay
 
 
-def create_plot(df):
-    """棒グラフを作成"""
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+def create_plot(df, lane_data):
+    """棒グラフとプロファイルを作成"""
+    n_lanes = len(lane_data)
+    
+    fig = plt.figure(figsize=(14, 8))
+    
+    # 上段: 棒グラフ
+    ax1 = fig.add_subplot(2, 2, 1)
+    ax2 = fig.add_subplot(2, 2, 2)
     
     colors = plt.cm.viridis(df['Relative_%'] / 100)
     
     # Volume
-    axes[0].bar(df['Lane'], df['Volume'], color=colors, edgecolor='black')
-    axes[0].set_title('Band Volume', fontweight='bold')
-    axes[0].set_xlabel('Lane')
-    axes[0].set_ylabel('Volume')
-    axes[0].grid(axis='y', alpha=0.3)
+    ax1.bar(df['Lane'], df['Volume'], color=colors, edgecolor='black')
+    ax1.set_title('Band Volume', fontweight='bold')
+    ax1.set_xlabel('Lane')
+    ax1.set_ylabel('Volume')
+    ax1.grid(axis='y', alpha=0.3)
     
     # Relative %
-    bars = axes[1].bar(df['Lane'], df['Relative_%'], color=colors, edgecolor='black')
-    axes[1].set_title('Relative Intensity (%)', fontweight='bold')
-    axes[1].set_xlabel('Lane')
-    axes[1].set_ylabel('Relative %')
-    axes[1].set_ylim(0, 115)
-    axes[1].axhline(y=100, color='red', linestyle='--', alpha=0.5)
-    axes[1].grid(axis='y', alpha=0.3)
+    bars = ax2.bar(df['Lane'], df['Relative_%'], color=colors, edgecolor='black')
+    ax2.set_title('Relative Intensity (%)', fontweight='bold')
+    ax2.set_xlabel('Lane')
+    ax2.set_ylabel('Relative %')
+    ax2.set_ylim(0, 115)
+    ax2.axhline(y=100, color='red', linestyle='--', alpha=0.5)
+    ax2.grid(axis='y', alpha=0.3)
     
     for bar, rel in zip(bars, df['Relative_%']):
-        axes[1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
-                    f'{rel:.1f}%', ha='center', va='bottom', fontsize=8)
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
+                f'{rel:.1f}%', ha='center', va='bottom', fontsize=8)
+    
+    # 下段: プロファイル
+    ax3 = fig.add_subplot(2, 1, 2)
+    
+    for i, ld in enumerate(lane_data):
+        profile = ld['profile']
+        x = np.arange(len(profile))
+        ax3.plot(x, profile, label=f'Lane {i+1}', alpha=0.7)
+        # バンド領域をハイライト
+        ax3.axvspan(ld['top'], ld['bottom'], alpha=0.1)
+    
+    ax3.set_title('Lane Profiles (Corrected)', fontweight='bold')
+    ax3.set_xlabel('Position (pixels)')
+    ax3.set_ylabel('Intensity')
+    ax3.legend(loc='upper right', ncol=min(6, n_lanes), fontsize=8)
+    ax3.grid(alpha=0.3)
     
     plt.tight_layout()
     return fig
@@ -267,7 +249,7 @@ st.set_page_config(
 )
 
 st.title("🧬 Western Blot Quantifier")
-st.markdown("ウェスタンブロットのバンドを自動定量化（レーンベース検出）")
+st.markdown("プロファイルベース測定（ImageJ方式）")
 
 # サイドバー
 with st.sidebar:
@@ -277,18 +259,11 @@ with st.sidebar:
     exclude_last = st.checkbox("最後のレーン（マーカー）を除外")
     
     st.markdown("---")
-    
-    st.markdown("### 🔧 詳細設定")
-    sensitivity = st.slider("検出感度", min_value=0.5, max_value=3.0, value=1.5, step=0.1,
-                           help="高い値 = より多くのバンドを検出（ノイズも増える可能性）")
-    
-    st.markdown("---")
     st.markdown("### 📖 使い方")
     st.markdown("""
     1. 画像をアップロード
     2. レーン数を設定
-    3. 必要に応じて感度調整
-    4. 「定量化」ボタンをクリック
+    3. 「定量化」ボタンをクリック
     """)
     
     st.markdown("---")
@@ -299,7 +274,6 @@ with st.sidebar:
 uploaded_file = st.file_uploader("画像をアップロード", type=['png', 'jpg', 'jpeg', 'tif', 'tiff'])
 
 if uploaded_file is not None:
-    # 画像を表示
     img, gray = load_image(uploaded_file)
     
     col1, col2 = st.columns(2)
@@ -308,18 +282,14 @@ if uploaded_file is not None:
         st.subheader("📷 元画像")
         st.image(uploaded_file, use_container_width=True)
     
-    # 定量化ボタン
     if st.button("🔬 定量化を実行", type="primary", use_container_width=True):
         with st.spinner("処理中..."):
-            # 処理
-            results, lane_data = process_image(img, gray, num_lanes, exclude_last, sensitivity)
+            results, lane_data = process_image(img, gray, num_lanes, exclude_last)
             
-            # DataFrame
             df = pd.DataFrame(results)
             max_volume = df['Volume'].max()
             df['Relative_%'] = (df['Volume'] / max_volume * 100).round(2) if max_volume > 0 else 0
             
-            # オーバーレイ
             overlay = create_overlay(img, gray, lane_data, num_lanes)
             overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
         
@@ -331,15 +301,15 @@ if uploaded_file is not None:
         
         # グラフ
         st.subheader("📊 定量結果")
-        fig = create_plot(df)
+        fig = create_plot(df, lane_data)
         st.pyplot(fig)
         
         # データテーブル
         st.subheader("📋 データ")
-        st.dataframe(df[['Lane', 'Volume', 'Mean', 'Relative_%']], use_container_width=True)
+        st.dataframe(df, use_container_width=True)
         
         # CSVダウンロード
-        csv = df[['Lane', 'Volume', 'Mean', 'Area', 'Relative_%']].to_csv(index=False).encode('utf-8-sig')
+        csv = df.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             label="📥 CSVをダウンロード",
             data=csv,
@@ -350,15 +320,14 @@ if uploaded_file is not None:
 else:
     st.info("👆 画像をアップロードしてください")
     
-    # デモ用の説明
     st.markdown("---")
     st.markdown("### ✨ 特徴")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("#### 🔬 レーンベース検出")
-        st.markdown("各レーン内で個別にバンドを検出、ノイズに強い")
+        st.markdown("#### 📈 プロファイルベース")
+        st.markdown("ImageJと同じ方式で安定した測定")
     
     with col2:
         st.markdown("#### 📊 即座に結果")
