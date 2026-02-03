@@ -1,6 +1,7 @@
-pyimagej>=1.4.0
-numpy>=1.20.0
-pandas>=1.3.0
-matplotlib>=3.4.0
-Pillow>=8.0.0
-openjdk-11
+streamlit>=1.28.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+Pillow>=9.5.0
+scipy>=1.10.0
