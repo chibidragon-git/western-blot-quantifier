@@ -134,6 +134,28 @@ def apply_custom_css():
     .stSlider label, .stSlider * {
         color: white !important;
     }
+    
+    /* スライダーラベル強制 */
+    [data-testid="stSlider"] label {
+        color: white !important;
+    }
+    
+    [data-testid="stSlider"] p {
+        color: white !important;
+    }
+    
+    .stSlider [data-baseweb="slider"] {
+        color: white !important;
+    }
+    
+    /* Streamlitのデフォルトテキスト */
+    .stMarkdown, .stMarkdown p, .stMarkdown span {
+        color: white !important;
+    }
+    
+    p, span, label, div {
+        color: white !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
