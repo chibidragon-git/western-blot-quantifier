@@ -335,12 +335,40 @@ with st.sidebar:
     st.markdown("## ⚙️ 設定")
     
     st.markdown("### 🎚️ 閾値")
-    low_thresh = st.slider("低閾値（薄いバンド用）", min_value=5, max_value=30, value=10)
-    high_thresh = st.slider("高閾値（濃いバンド用）", min_value=15, max_value=50, value=20)
-    weak_threshold = st.slider("薄いバンド判定値", min_value=50, max_value=200, value=130)
+    low_thresh = st.slider("低閾値（薄いバンド用）", min_value=5, max_value=30, value=10,
+                           help="薄いバンドを検出するときの閾値。小さいほど薄いバンドも検出")
+    high_thresh = st.slider("高閾値（濃いバンド用）", min_value=15, max_value=50, value=20,
+                            help="濃いバンドを検出するときの閾値。大きいほどタイトに検出")
+    weak_threshold = st.slider("薄いバンド判定値", min_value=50, max_value=200, value=130,
+                               help="この値以下の強度のバンドを「薄いバンド」と判定")
     
     st.markdown("### 🔧 フィルター")
-    min_area = st.slider("最小面積", min_value=50, max_value=500, value=100)
+    min_area = st.slider("最小面積", min_value=50, max_value=500, value=100,
+                         help="ノイズ除去。この面積以下の検出は除外")
+    
+    st.markdown("---")
+    
+    # 使い方
+    with st.expander("📖 使い方"):
+        st.markdown("""
+        **1. 画像をアップロード**
+        - Western Blotの画像をドラッグ&ドロップ
+        - PNG, JPG, TIFF対応
+        
+        **2. 「解析」をクリック**
+        - バンドを自動検出
+        - 緑枠 = 濃いバンド
+        - 黄枠 = 薄いバンド
+        
+        **3. 結果を確認**
+        - グラフで相対強度を確認
+        - CSVでデータをダウンロード
+        
+        **💡 うまく検出されない場合**
+        - 薄いバンドが小さい → 低閾値を下げる
+        - 濃いバンドが大きすぎ → 高閾値を上げる
+        - ノイズが多い → 最小面積を上げる
+        """)
     
     st.markdown("---")
     st.markdown("### 🔗 リンク")
