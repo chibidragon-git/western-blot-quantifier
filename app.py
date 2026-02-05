@@ -61,6 +61,16 @@ def apply_custom_css():
         color: white !important;
     }
     
+    /* サイドバー開閉ボタン */
+    [data-testid="collapsedControl"] {
+        color: white !important;
+        background: #1e293b !important;
+    }
+    
+    button[kind="headerNoPadding"] {
+        color: white !important;
+    }
+    
     /* ボタン */
     .stButton > button {
         background: linear-gradient(90deg, #0ea5e9 0%, #10b981 100%);
