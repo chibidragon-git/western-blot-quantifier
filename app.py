@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Western Blot Quantifier v4.2 - Web App
-輪郭検出ベースのバンド認識
+Western Blot Quantifier v4.3 - Web App
+スマートハイブリッド方式：濃いバンドは高閾値、薄いバンドは低閾値で検出
 """
 
 import streamlit as st
@@ -28,72 +28,91 @@ def load_image(uploaded_file):
     return img_bgr, gray
 
 
-def detect_bands(gray, min_area=100, threshold=20):
-    """輪郭検出でバンドを認識"""
+def detect_bands_smart(gray, low_thresh=10, high_thresh=20, weak_threshold=130, min_area=100):
+    """スマートハイブリッド方式でバンドを検出"""
     h, w = gray.shape
     
-    # 背景を推定
     bg = np.percentile(gray, 90)
-    
-    # 反転して二値化
     inverted = np.maximum(0, bg - gray.astype(np.float64)).astype(np.uint8)
-    _, binary = cv2.threshold(inverted, threshold, 255, cv2.THRESH_BINARY)
     
-    # モルフォロジー処理でノイズ除去
     kernel = np.ones((3, 3), np.uint8)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
     
-    # 輪郭検出
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # 低閾値で全バンド検出
+    _, binary_low = cv2.threshold(inverted, low_thresh, 255, cv2.THRESH_BINARY)
+    binary_low = cv2.morphologyEx(binary_low, cv2.MORPH_OPEN, kernel)
+    binary_low = cv2.morphologyEx(binary_low, cv2.MORPH_CLOSE, kernel)
+    contours_low, _ = cv2.findContours(binary_low, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    # バンド情報を抽出
-    bands = []
-    for cnt in contours:
+    # 高閾値で検出
+    _, binary_high = cv2.threshold(inverted, high_thresh, 255, cv2.THRESH_BINARY)
+    binary_high = cv2.morphologyEx(binary_high, cv2.MORPH_OPEN, kernel)
+    binary_high = cv2.morphologyEx(binary_high, cv2.MORPH_CLOSE, kernel)
+    contours_high, _ = cv2.findContours(binary_high, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # 高閾値のバンド情報をdict化
+    high_bands = {}
+    for cnt in contours_high:
         x, y, cw, ch = cv2.boundingRect(cnt)
         area = cv2.contourArea(cnt)
         if area > min_area:
-            # バンド領域の強度を計算
-            band_region = gray[y:y+ch, x:x+cw]
-            local_bg = np.percentile(band_region, 90)
-            inv_region = np.maximum(0, local_bg - band_region.astype(np.float64))
-            volume = np.sum(inv_region)
-            mean_intensity = np.mean(inv_region)
-            
-            bands.append({
-                'x': x,
-                'y': y,
-                'width': cw,
-                'height': ch,
-                'area': area,
-                'volume': volume,
-                'mean': mean_intensity,
-                'contour': cnt
-            })
+            high_bands[x] = (x, y, cw, ch, area, cnt)
     
-    # X座標でソート（左から右）
+    # 各バンドを処理
+    bands = []
+    
+    for cnt in contours_low:
+        x, y, cw, ch = cv2.boundingRect(cnt)
+        area = cv2.contourArea(cnt)
+        if area > min_area:
+            band_region = inverted[y:y+ch, x:x+cw]
+            max_val = band_region.max()
+            
+            # 強度に基づいて判定
+            is_weak = max_val < weak_threshold
+            
+            if is_weak:
+                # 薄いバンド → 低閾値の結果を使用
+                local_bg = np.percentile(band_region, 90)
+                inv_region = np.maximum(0, local_bg - band_region.astype(np.float64))
+                volume = np.sum(inv_region)
+                mean_intensity = np.mean(inv_region)
+                bands.append({
+                    'x': x, 'y': y, 'width': cw, 'height': ch,
+                    'area': area, 'volume': volume, 'mean': mean_intensity,
+                    'strength': 'weak', 'contour': cnt
+                })
+            else:
+                # 濃いバンド → 高閾値の結果を探す
+                found = False
+                for hx, (hx2, hy, hw, hh, ha, hcnt) in high_bands.items():
+                    if abs(x - hx) < 30:
+                        hband_region = inverted[hy:hy+hh, hx2:hx2+hw]
+                        local_bg = np.percentile(hband_region, 90)
+                        inv_region = np.maximum(0, local_bg - hband_region.astype(np.float64))
+                        volume = np.sum(inv_region)
+                        mean_intensity = np.mean(inv_region)
+                        bands.append({
+                            'x': hx2, 'y': hy, 'width': hw, 'height': hh,
+                            'area': ha, 'volume': volume, 'mean': mean_intensity,
+                            'strength': 'strong', 'contour': hcnt
+                        })
+                        found = True
+                        break
+                if not found:
+                    local_bg = np.percentile(band_region, 90)
+                    inv_region = np.maximum(0, local_bg - band_region.astype(np.float64))
+                    volume = np.sum(inv_region)
+                    mean_intensity = np.mean(inv_region)
+                    bands.append({
+                        'x': x, 'y': y, 'width': cw, 'height': ch,
+                        'area': area, 'volume': volume, 'mean': mean_intensity,
+                        'strength': 'weak', 'contour': cnt
+                    })
+    
+    # X座標でソート
     bands.sort(key=lambda b: b['x'])
     
-    return bands, binary
-
-
-def process_image(img, gray, min_area=100, threshold=20):
-    """画像を処理"""
-    bands, binary = detect_bands(gray, min_area, threshold)
-    
-    results = []
-    for i, band in enumerate(bands):
-        results.append({
-            'Lane': i + 1,
-            'X': band['x'],
-            'Y': band['y'],
-            'Width': band['width'],
-            'Height': band['height'],
-            'Volume': round(band['volume'], 0),
-            'Mean': round(band['mean'], 2),
-        })
-    
-    return results, bands, binary
+    return bands
 
 
 def create_overlay(img, bands):
@@ -102,9 +121,11 @@ def create_overlay(img, bands):
     
     for i, band in enumerate(bands):
         x, y, w, h = band['x'], band['y'], band['width'], band['height']
-        cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        # 濃いバンド=緑、薄いバンド=黄色
+        color = (0, 255, 0) if band['strength'] == 'strong' else (0, 255, 255)
+        cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 2)
         cv2.putText(overlay, str(i + 1), (x + w // 2 - 5, y - 5),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
     
     return overlay
 
@@ -147,15 +168,21 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🧬 Western Blot Quantifier v4.2")
-st.markdown("輪郭検出ベースのバンド自動認識")
+st.title("🧬 Western Blot Quantifier v4.3")
+st.markdown("スマートハイブリッド方式：濃いバンドは高閾値、薄いバンドは低閾値で自動検出")
 
 # サイドバー
 with st.sidebar:
     st.header("⚙️ 設定")
     
-    threshold = st.slider("検出閾値", min_value=5, max_value=50, value=20,
-                          help="バンドと背景を分ける閾値")
+    st.subheader("閾値設定")
+    low_thresh = st.slider("低閾値（薄いバンド用）", min_value=5, max_value=30, value=10,
+                           help="薄いバンドを検出する際の閾値")
+    high_thresh = st.slider("高閾値（濃いバンド用）", min_value=15, max_value=50, value=20,
+                            help="濃いバンドを検出する際の閾値")
+    weak_threshold = st.slider("薄いバンド判定閾値", min_value=50, max_value=200, value=130,
+                               help="この値以下の強度のバンドを薄いバンドとして判定")
+    
     min_area = st.slider("最小面積", min_value=50, max_value=500, value=100,
                          help="ノイズ除去のための最小バンド面積")
     
@@ -179,11 +206,24 @@ if uploaded_file is not None:
     
     if st.button("🔬 定量化を実行", type="primary", use_container_width=True):
         with st.spinner("処理中..."):
-            results, bands, binary = process_image(img, gray, min_area, threshold)
+            bands = detect_bands_smart(gray, low_thresh, high_thresh, weak_threshold, min_area)
             
-            if len(results) == 0:
+            if len(bands) == 0:
                 st.error("バンドが検出されませんでした。閾値を調整してください。")
             else:
+                results = []
+                for i, band in enumerate(bands):
+                    results.append({
+                        'Lane': i + 1,
+                        'X': band['x'],
+                        'Y': band['y'],
+                        'Width': band['width'],
+                        'Height': band['height'],
+                        'Volume': round(band['volume'], 0),
+                        'Mean': round(band['mean'], 2),
+                        'Type': '薄' if band['strength'] == 'weak' else '濃',
+                    })
+                
                 df = pd.DataFrame(results)
                 max_volume = df['Volume'].max()
                 df['Relative_%'] = (df['Volume'] / max_volume * 100).round(2) if max_volume > 0 else 0
@@ -194,13 +234,11 @@ if uploaded_file is not None:
                 with col2:
                     st.subheader("🎯 検出結果")
                     st.image(overlay_rgb, use_container_width=True)
-                    st.caption(f"{len(bands)}個のバンドを検出")
+                    weak_count = sum(1 for b in bands if b['strength'] == 'weak')
+                    strong_count = len(bands) - weak_count
+                    st.caption(f"{len(bands)}個のバンドを検出（濃:{strong_count}、薄:{weak_count}）")
                 
                 st.markdown("---")
-                
-                # 二値化画像を表示
-                with st.expander("🔍 二値化画像を表示"):
-                    st.image(binary, use_container_width=True, caption="二値化結果")
                 
                 st.subheader("📊 定量結果")
                 fig = create_plot(df)
@@ -221,9 +259,10 @@ else:
     st.info("👆 画像をアップロードしてください")
     
     st.markdown("---")
-    st.markdown("### ✨ v4.2 の特徴")
+    st.markdown("### ✨ v4.3 の特徴")
     st.markdown("""
-    - **輪郭検出**: バンドの形を自動認識
-    - **ノイズ除去**: モルフォロジー処理
-    - **パラメータ調整**: 閾値と最小面積を調整可能
+    - **スマートハイブリッド方式**: バンドの強度に応じて自動で閾値を切り替え
+    - **濃いバンド**: 高閾値で精密に検出（緑色で表示）
+    - **薄いバンド**: 低閾値で広めに検出（黄色で表示）
+    - **パラメータ調整**: サイドバーで閾値を細かく調整可能
     """)
