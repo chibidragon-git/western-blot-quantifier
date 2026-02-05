@@ -81,8 +81,13 @@ def apply_custom_css():
         border: 2px dashed #0ea5e9;
     }
     
-    [data-testid="stFileUploader"], [data-testid="stFileUploader"] * {
-        color: white !important;
+    /* アップローダー内の文字は暗い色に */
+    [data-testid="stFileUploader"] * {
+        color: #1e293b !important;
+    }
+    
+    [data-testid="stFileUploader"] {
+        background: white;
     }
     
     /* 特徴カード */
