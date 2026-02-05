@@ -35,28 +35,38 @@ def find_band_region(gray):
     
     # 縦方向プロファイル
     profile = np.mean(gray, axis=1)
-    smoothed = gaussian_filter1d(profile, sigma=2)
+    smoothed = gaussian_filter1d(profile, sigma=1.5)
     
-    # 最も暗い行（バンドの中心）
-    min_row = np.argmin(smoothed)
-    min_val = smoothed[min_row]
-    max_val = smoothed.max()
+    # 背景値を推定（最も明るい部分）
+    bg_val = np.percentile(smoothed, 95)
     
-    # バンド領域の閾値
-    threshold = min_val + (max_val - min_val) * 0.5
+    # 反転プロファイル（バンドがピークになる）
+    inverted = bg_val - smoothed
+    inverted = np.maximum(inverted, 0)
+    
+    if inverted.max() < 1:
+        # バンドが検出できない場合は中央を返す
+        return h // 4, 3 * h // 4
+    
+    # 最も強いバンド位置
+    peak = np.argmax(inverted)
+    peak_val = inverted[peak]
+    
+    # バンド領域の閾値（ピーク値の30%）
+    threshold = peak_val * 0.3
     
     # 上端を探す
-    top = min_row
-    while top > 0 and smoothed[top] < threshold:
+    top = peak
+    while top > 0 and inverted[top] > threshold:
         top -= 1
     
     # 下端を探す
-    bottom = min_row
-    while bottom < h - 1 and smoothed[bottom] < threshold:
+    bottom = peak
+    while bottom < h - 1 and inverted[bottom] > threshold:
         bottom += 1
     
-    # 余裕を持たせる
-    margin = max(3, (bottom - top) // 3)
+    # 余裕を持たせる（バンド幅の50%）
+    margin = max(5, (bottom - top) // 2)
     top = max(0, top - margin)
     bottom = min(h - 1, bottom + margin)
     
