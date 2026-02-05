@@ -12,18 +12,18 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
 
-# カスタムCSS
+# カスタムCSS（ライトテーマ）
 def apply_custom_css():
     st.markdown("""
     <style>
-    /* メインコンテナ */
+    /* ライトテーマベース */
     .stApp {
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
     }
     
     /* ヘッダー */
     .main-header {
-        color: #ffffff;
+        color: #1e293b !important;
         font-size: 2.5rem;
         font-weight: 800;
         text-align: center;
@@ -32,121 +32,67 @@ def apply_custom_css():
     }
     
     .sub-header {
-        color: #cbd5e1;
+        color: #64748b !important;
         text-align: center;
         font-size: 1rem;
         margin-bottom: 2rem;
     }
     
     /* カード */
-    .card {
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(10px);
-        border-radius: 16px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    }
-    
     .card-title {
-        color: #ffffff;
+        color: #1e293b !important;
         font-size: 1.2rem;
         font-weight: 600;
         margin-bottom: 1rem;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
     }
     
     /* サイドバー */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1e1e2f 0%, #2d2d44 100%);
+        background: linear-gradient(180deg, #1e293b 0%, #334155 100%);
     }
     
     [data-testid="stSidebar"] .stMarkdown {
-        color: #ffffff;
+        color: #ffffff !important;
     }
     
     /* ボタン */
     .stButton > button {
-        background: linear-gradient(90deg, #22d3ee 0%, #34d399 100%);
-        color: #0f172a;
+        background: linear-gradient(90deg, #0ea5e9 0%, #10b981 100%);
+        color: white !important;
         border: none;
         border-radius: 12px;
         padding: 0.75rem 2rem;
         font-weight: 600;
         font-size: 1rem;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(34, 211, 238, 0.4);
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(34, 211, 238, 0.6);
+        box-shadow: 0 4px 15px rgba(14, 165, 233, 0.4);
     }
     
     /* ファイルアップローダー */
     [data-testid="stFileUploader"] {
-        background: rgba(255, 255, 255, 0.05);
+        background: white;
         border-radius: 16px;
         padding: 2rem;
-        border: 2px dashed rgba(34, 211, 238, 0.5);
-    }
-    
-    [data-testid="stFileUploader"]:hover {
-        border-color: rgba(34, 211, 238, 0.8);
-        background: rgba(255, 255, 255, 0.08);
-    }
-    
-    /* データフレーム */
-    .stDataFrame {
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 12px;
-    }
-    
-    /* スライダー */
-    .stSlider > div > div {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-    }
-    
-    /* メトリクス */
-    [data-testid="stMetric"] {
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 12px;
-        padding: 1rem;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-    
-    [data-testid="stMetricValue"] {
-        color: #22d3ee;
-        font-weight: 700;
-    }
-    
-    /* 成功/エラーメッセージ */
-    .stSuccess, .stInfo {
-        background: rgba(34, 211, 238, 0.2);
-        border-radius: 12px;
-        border: 1px solid rgba(34, 211, 238, 0.3);
+        border: 2px dashed #0ea5e9;
     }
     
     /* 特徴カード */
     .feature-card {
-        background: rgba(255, 255, 255, 0.03);
+        background: white;
         border-radius: 12px;
         padding: 1rem;
         margin: 0.5rem 0;
-        border-left: 3px solid #22d3ee;
+        border-left: 4px solid #0ea5e9;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     }
     
     .feature-title {
-        color: #ffffff;
+        color: #1e293b !important;
         font-weight: 600;
         margin-bottom: 0.3rem;
     }
     
     .feature-desc {
-        color: #cbd5e1;
+        color: #64748b !important;
         font-size: 0.9rem;
     }
     
@@ -161,12 +107,12 @@ def apply_custom_css():
     }
     
     .badge-strong {
-        background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+        background: #10b981;
         color: white;
     }
     
     .badge-weak {
-        background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
+        background: #f59e0b;
         color: white;
     }
     </style>
@@ -286,16 +232,15 @@ def create_overlay(img, bands):
 
 
 def create_plot(df):
-    """スタイリッシュな棒グラフを作成"""
-    plt.style.use('dark_background')
+    """棒グラフを作成（ライトテーマ）"""
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    fig.patch.set_facecolor('#1a1a2e')
+    fig.patch.set_facecolor('#f8fafc')
     
     for ax in axes:
-        ax.set_facecolor('#1a1a2e')
-        ax.tick_params(colors='#a0aec0')
-        ax.spines['bottom'].set_color('#4a5568')
-        ax.spines['left'].set_color('#4a5568')
+        ax.set_facecolor('#f8fafc')
+        ax.tick_params(colors='#1e293b')
+        ax.spines['bottom'].set_color('#cbd5e1')
+        ax.spines['left'].set_color('#cbd5e1')
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
     
@@ -303,25 +248,25 @@ def create_plot(df):
     colors = plt.cm.plasma(np.linspace(0.2, 0.8, len(df)))
     
     # Volume グラフ
-    bars1 = axes[0].bar(df['Lane'], df['Volume'], color=colors, edgecolor='none', width=0.7)
-    axes[0].set_title('Band Volume', fontweight='bold', color='#e2e8f0', fontsize=14, pad=15)
-    axes[0].set_xlabel('Lane', color='#a0aec0', fontsize=11)
-    axes[0].set_ylabel('Volume', color='#a0aec0', fontsize=11)
-    axes[0].grid(axis='y', alpha=0.2, color='#4a5568')
+    axes[0].bar(df['レーン'], df['Volume'], color=colors, edgecolor='none', width=0.7)
+    axes[0].set_title('Band Volume', fontweight='bold', color='#1e293b', fontsize=14, pad=15)
+    axes[0].set_xlabel('レーン', color='#64748b', fontsize=11)
+    axes[0].set_ylabel('Volume', color='#64748b', fontsize=11)
+    axes[0].grid(axis='y', alpha=0.3, color='#cbd5e1')
     
     # Relative グラフ
-    bars2 = axes[1].bar(df['Lane'], df['Relative_%'], color=colors, edgecolor='none', width=0.7)
-    axes[1].set_title('Relative Intensity (%)', fontweight='bold', color='#e2e8f0', fontsize=14, pad=15)
-    axes[1].set_xlabel('Lane', color='#a0aec0', fontsize=11)
-    axes[1].set_ylabel('Relative %', color='#a0aec0', fontsize=11)
+    bars2 = axes[1].bar(df['レーン'], df['相対値_%'], color=colors, edgecolor='none', width=0.7)
+    axes[1].set_title('相対強度 (%)', fontweight='bold', color='#1e293b', fontsize=14, pad=15)
+    axes[1].set_xlabel('レーン', color='#64748b', fontsize=11)
+    axes[1].set_ylabel('相対値 %', color='#64748b', fontsize=11)
     axes[1].set_ylim(0, 120)
-    axes[1].axhline(y=100, color='#22d3ee', linestyle='--', alpha=0.7, linewidth=2)
-    axes[1].grid(axis='y', alpha=0.2, color='#4a5568')
+    axes[1].axhline(y=100, color='#0ea5e9', linestyle='--', alpha=0.7, linewidth=2)
+    axes[1].grid(axis='y', alpha=0.3, color='#cbd5e1')
     
-    for bar, rel in zip(bars2, df['Relative_%']):
+    for bar, rel in zip(bars2, df['相対値_%']):
         axes[1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 2,
                     f'{rel:.1f}%', ha='center', va='bottom', fontsize=9, 
-                    fontweight='bold', color='#e2e8f0')
+                    fontweight='bold', color='#1e293b')
     
     plt.tight_layout()
     return fig
@@ -367,10 +312,10 @@ uploaded_file = st.file_uploader("", type=['png', 'jpg', 'jpeg', 'tif', 'tiff'],
 
 if uploaded_file is None:
     st.markdown("""
-    <div style="text-align: center; padding: 3rem; color: #a0aec0;">
+    <div style="text-align: center; padding: 3rem; color: #64748b;">
         <div style="font-size: 4rem; margin-bottom: 1rem;">📤</div>
-        <div style="font-size: 1.2rem; margin-bottom: 0.5rem;">Western Blot画像をここにドロップ</div>
-        <div style="font-size: 0.9rem; color: #718096;">PNG, JPG, TIFF対応</div>
+        <div style="font-size: 1.2rem; margin-bottom: 0.5rem; color: #1e293b;">Western Blot画像をここにドロップ</div>
+        <div style="font-size: 0.9rem;">PNG, JPG, TIFF対応</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -418,7 +363,7 @@ else:
         result_placeholder = st.empty()
         result_placeholder.markdown("""
         <div style="display: flex; align-items: center; justify-content: center; 
-                    height: 200px; color: #718096; font-style: italic;">
+                    height: 200px; color: #64748b; font-style: italic;">
             「解析」をクリックしてバンドを検出
         </div>
         """, unsafe_allow_html=True)
