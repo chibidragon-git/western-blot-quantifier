@@ -12,6 +12,168 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
 
+# カスタムCSS
+def apply_custom_css():
+    st.markdown("""
+    <style>
+    /* メインコンテナ */
+    .stApp {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    }
+    
+    /* ヘッダー */
+    .main-header {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-size: 2.5rem;
+        font-weight: 800;
+        text-align: center;
+        padding: 1rem 0;
+        margin-bottom: 0.5rem;
+    }
+    
+    .sub-header {
+        color: #a0aec0;
+        text-align: center;
+        font-size: 1rem;
+        margin-bottom: 2rem;
+    }
+    
+    /* カード */
+    .card {
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(10px);
+        border-radius: 16px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    
+    .card-title {
+        color: #e2e8f0;
+        font-size: 1.2rem;
+        font-weight: 600;
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    /* サイドバー */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1e1e2f 0%, #2d2d44 100%);
+    }
+    
+    [data-testid="stSidebar"] .stMarkdown {
+        color: #e2e8f0;
+    }
+    
+    /* ボタン */
+    .stButton > button {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 0.75rem 2rem;
+        font-weight: 600;
+        font-size: 1rem;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+    }
+    
+    /* ファイルアップローダー */
+    [data-testid="stFileUploader"] {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 16px;
+        padding: 2rem;
+        border: 2px dashed rgba(102, 126, 234, 0.5);
+    }
+    
+    [data-testid="stFileUploader"]:hover {
+        border-color: rgba(102, 126, 234, 0.8);
+        background: rgba(255, 255, 255, 0.08);
+    }
+    
+    /* データフレーム */
+    .stDataFrame {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+    }
+    
+    /* スライダー */
+    .stSlider > div > div {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    }
+    
+    /* メトリクス */
+    [data-testid="stMetric"] {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        padding: 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    [data-testid="stMetricValue"] {
+        color: #667eea;
+        font-weight: 700;
+    }
+    
+    /* 成功/エラーメッセージ */
+    .stSuccess, .stInfo {
+        background: rgba(102, 126, 234, 0.2);
+        border-radius: 12px;
+        border: 1px solid rgba(102, 126, 234, 0.3);
+    }
+    
+    /* 特徴カード */
+    .feature-card {
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 12px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-left: 3px solid #667eea;
+    }
+    
+    .feature-title {
+        color: #667eea;
+        font-weight: 600;
+        margin-bottom: 0.3rem;
+    }
+    
+    .feature-desc {
+        color: #a0aec0;
+        font-size: 0.9rem;
+    }
+    
+    /* 結果バッジ */
+    .result-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin: 0.25rem;
+    }
+    
+    .badge-strong {
+        background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+        color: white;
+    }
+    
+    .badge-weak {
+        background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
+        color: white;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 
 def load_image(uploaded_file):
     """アップロードされた画像を読み込む"""
@@ -71,7 +233,6 @@ def detect_bands_smart(gray, low_thresh=10, high_thresh=20, weak_threshold=130, 
             is_weak = max_val < weak_threshold
             
             if is_weak:
-                # 薄いバンド → 低閾値の結果を使用
                 local_bg = np.percentile(band_region, 90)
                 inv_region = np.maximum(0, local_bg - band_region.astype(np.float64))
                 volume = np.sum(inv_region)
@@ -82,7 +243,6 @@ def detect_bands_smart(gray, low_thresh=10, high_thresh=20, weak_threshold=130, 
                     'strength': 'weak', 'contour': cnt
                 })
             else:
-                # 濃いバンド → 高閾値の結果を探す
                 found = False
                 for hx, (hx2, hy, hw, hh, ha, hcnt) in high_bands.items():
                     if abs(x - hx) < 30:
@@ -109,9 +269,7 @@ def detect_bands_smart(gray, low_thresh=10, high_thresh=20, weak_threshold=130, 
                         'strength': 'weak', 'contour': cnt
                     })
     
-    # X座標でソート
     bands.sort(key=lambda b: b['x'])
-    
     return bands
 
 
@@ -121,7 +279,6 @@ def create_overlay(img, bands):
     
     for i, band in enumerate(bands):
         x, y, w, h = band['x'], band['y'], band['width'], band['height']
-        # 濃いバンド=緑、薄いバンド=黄色
         color = (0, 255, 0) if band['strength'] == 'strong' else (0, 255, 255)
         cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 2)
         cv2.putText(overlay, str(i + 1), (x + w // 2 - 5, y - 5),
@@ -131,28 +288,42 @@ def create_overlay(img, bands):
 
 
 def create_plot(df):
-    """棒グラフを作成"""
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    """スタイリッシュな棒グラフを作成"""
+    plt.style.use('dark_background')
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig.patch.set_facecolor('#1a1a2e')
     
-    colors = plt.cm.viridis(df['Relative_%'] / 100)
+    for ax in axes:
+        ax.set_facecolor('#1a1a2e')
+        ax.tick_params(colors='#a0aec0')
+        ax.spines['bottom'].set_color('#4a5568')
+        ax.spines['left'].set_color('#4a5568')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
     
-    axes[0].bar(df['Lane'], df['Volume'], color=colors, edgecolor='black')
-    axes[0].set_title('Band Volume', fontweight='bold')
-    axes[0].set_xlabel('Lane')
-    axes[0].set_ylabel('Volume')
-    axes[0].grid(axis='y', alpha=0.3)
+    # グラデーションカラー
+    colors = plt.cm.plasma(np.linspace(0.2, 0.8, len(df)))
     
-    bars = axes[1].bar(df['Lane'], df['Relative_%'], color=colors, edgecolor='black')
-    axes[1].set_title('Relative Intensity (%)', fontweight='bold')
-    axes[1].set_xlabel('Lane')
-    axes[1].set_ylabel('Relative %')
-    axes[1].set_ylim(0, 115)
-    axes[1].axhline(y=100, color='red', linestyle='--', alpha=0.5)
-    axes[1].grid(axis='y', alpha=0.3)
+    # Volume グラフ
+    bars1 = axes[0].bar(df['Lane'], df['Volume'], color=colors, edgecolor='none', width=0.7)
+    axes[0].set_title('Band Volume', fontweight='bold', color='#e2e8f0', fontsize=14, pad=15)
+    axes[0].set_xlabel('Lane', color='#a0aec0', fontsize=11)
+    axes[0].set_ylabel('Volume', color='#a0aec0', fontsize=11)
+    axes[0].grid(axis='y', alpha=0.2, color='#4a5568')
     
-    for bar, rel in zip(bars, df['Relative_%']):
-        axes[1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
-                    f'{rel:.1f}%', ha='center', va='bottom', fontsize=8, fontweight='bold')
+    # Relative グラフ
+    bars2 = axes[1].bar(df['Lane'], df['Relative_%'], color=colors, edgecolor='none', width=0.7)
+    axes[1].set_title('Relative Intensity (%)', fontweight='bold', color='#e2e8f0', fontsize=14, pad=15)
+    axes[1].set_xlabel('Lane', color='#a0aec0', fontsize=11)
+    axes[1].set_ylabel('Relative %', color='#a0aec0', fontsize=11)
+    axes[1].set_ylim(0, 120)
+    axes[1].axhline(y=100, color='#667eea', linestyle='--', alpha=0.7, linewidth=2)
+    axes[1].grid(axis='y', alpha=0.2, color='#4a5568')
+    
+    for bar, rel in zip(bars2, df['Relative_%']):
+        axes[1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 2,
+                    f'{rel:.1f}%', ha='center', va='bottom', fontsize=9, 
+                    fontweight='bold', color='#e2e8f0')
     
     plt.tight_layout()
     return fig
@@ -168,48 +339,98 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🧬 Western Blot Quantifier v4.3")
-st.markdown("スマートハイブリッド方式：濃いバンドは高閾値、薄いバンドは低閾値で自動検出")
+apply_custom_css()
+
+# ヘッダー
+st.markdown('<h1 class="main-header">🧬 Western Blot Quantifier</h1>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Smart Hybrid Detection • Automatic Band Recognition</p>', unsafe_allow_html=True)
 
 # サイドバー
 with st.sidebar:
-    st.header("⚙️ 設定")
+    st.markdown("## ⚙️ Settings")
     
-    st.subheader("閾値設定")
-    low_thresh = st.slider("低閾値（薄いバンド用）", min_value=5, max_value=30, value=10,
-                           help="薄いバンドを検出する際の閾値")
-    high_thresh = st.slider("高閾値（濃いバンド用）", min_value=15, max_value=50, value=20,
-                            help="濃いバンドを検出する際の閾値")
-    weak_threshold = st.slider("薄いバンド判定閾値", min_value=50, max_value=200, value=130,
-                               help="この値以下の強度のバンドを薄いバンドとして判定")
+    st.markdown("### 🎚️ Threshold")
+    low_thresh = st.slider("Low (weak bands)", min_value=5, max_value=30, value=10)
+    high_thresh = st.slider("High (strong bands)", min_value=15, max_value=50, value=20)
+    weak_threshold = st.slider("Weak band cutoff", min_value=50, max_value=200, value=130)
     
-    min_area = st.slider("最小面積", min_value=50, max_value=500, value=100,
-                         help="ノイズ除去のための最小バンド面積")
+    st.markdown("### 🔧 Filter")
+    min_area = st.slider("Min area", min_value=50, max_value=500, value=100)
     
     st.markdown("---")
-    st.markdown("### 📎 リンク")
-    st.markdown("[GitHub](https://github.com/chibidragon-git/western-blot-quantifier)")
+    st.markdown("### 🔗 Links")
+    st.markdown("[📦 GitHub](https://github.com/chibidragon-git/western-blot-quantifier)")
+    st.markdown("---")
+    st.markdown("**v4.3** • Smart Hybrid")
 
 # メインエリア
-uploaded_file = st.file_uploader("画像をアップロード", type=['png', 'jpg', 'jpeg', 'tif', 'tiff'])
+uploaded_file = st.file_uploader("", type=['png', 'jpg', 'jpeg', 'tif', 'tiff'], 
+                                  label_visibility="collapsed")
 
-if uploaded_file is not None:
+if uploaded_file is None:
+    st.markdown("""
+    <div style="text-align: center; padding: 3rem; color: #a0aec0;">
+        <div style="font-size: 4rem; margin-bottom: 1rem;">📤</div>
+        <div style="font-size: 1.2rem; margin-bottom: 0.5rem;">Drop your Western Blot image here</div>
+        <div style="font-size: 0.9rem; color: #718096;">Supports PNG, JPG, TIFF</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("""
+        <div class="feature-card">
+            <div class="feature-title">🎯 Smart Detection</div>
+            <div class="feature-desc">Automatically adjusts threshold based on band intensity</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class="feature-card">
+            <div class="feature-title">⚡ Hybrid Mode</div>
+            <div class="feature-desc">Strong bands: tight ROI • Weak bands: wider ROI</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div class="feature-card">
+            <div class="feature-title">📊 Full Analysis</div>
+            <div class="feature-desc">Volume, relative intensity, and CSV export</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+else:
     img, gray = load_image(uploaded_file)
     h, w = gray.shape
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("📷 元画像")
+        st.markdown('<div class="card-title">📷 Original Image</div>', unsafe_allow_html=True)
         st.image(uploaded_file, use_container_width=True)
-        st.caption(f"サイズ: {w} x {h}")
+        st.caption(f"Size: {w} × {h} px")
     
-    if st.button("🔬 定量化を実行", type="primary", use_container_width=True):
-        with st.spinner("処理中..."):
+    with col2:
+        st.markdown('<div class="card-title">🎯 Detection Result</div>', unsafe_allow_html=True)
+        result_placeholder = st.empty()
+        result_placeholder.markdown("""
+        <div style="display: flex; align-items: center; justify-content: center; 
+                    height: 200px; color: #718096; font-style: italic;">
+            Click "Analyze" to detect bands
+        </div>
+        """, unsafe_allow_html=True)
+    
+    if st.button("🔬 Analyze", type="primary", use_container_width=True):
+        with st.spinner("Processing..."):
             bands = detect_bands_smart(gray, low_thresh, high_thresh, weak_threshold, min_area)
             
             if len(bands) == 0:
-                st.error("バンドが検出されませんでした。閾値を調整してください。")
+                st.error("❌ No bands detected. Try adjusting the thresholds.")
             else:
                 results = []
                 for i, band in enumerate(bands):
@@ -221,7 +442,7 @@ if uploaded_file is not None:
                         'Height': band['height'],
                         'Volume': round(band['volume'], 0),
                         'Mean': round(band['mean'], 2),
-                        'Type': '薄' if band['strength'] == 'weak' else '濃',
+                        'Type': '🟡 Weak' if band['strength'] == 'weak' else '🟢 Strong',
                     })
                 
                 df = pd.DataFrame(results)
@@ -232,37 +453,33 @@ if uploaded_file is not None:
                 overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
         
                 with col2:
-                    st.subheader("🎯 検出結果")
-                    st.image(overlay_rgb, use_container_width=True)
+                    result_placeholder.image(overlay_rgb, use_container_width=True)
                     weak_count = sum(1 for b in bands if b['strength'] == 'weak')
                     strong_count = len(bands) - weak_count
-                    st.caption(f"{len(bands)}個のバンドを検出（濃:{strong_count}、薄:{weak_count}）")
+                    
+                    st.markdown(f"""
+                    <div style="text-align: center; margin-top: 0.5rem;">
+                        <span class="result-badge badge-strong">🟢 Strong: {strong_count}</span>
+                        <span class="result-badge badge-weak">🟡 Weak: {weak_count}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 st.markdown("---")
                 
-                st.subheader("📊 定量結果")
+                st.markdown('<div class="card-title">📊 Quantification Results</div>', unsafe_allow_html=True)
                 fig = create_plot(df)
                 st.pyplot(fig)
                 
-                st.subheader("📋 データ")
-                st.dataframe(df, use_container_width=True)
+                st.markdown("---")
+                
+                st.markdown('<div class="card-title">📋 Data Table</div>', unsafe_allow_html=True)
+                st.dataframe(df, use_container_width=True, hide_index=True)
                 
                 csv = df.to_csv(index=False).encode('utf-8-sig')
                 st.download_button(
-                    label="📥 CSVをダウンロード",
+                    label="📥 Download CSV",
                     data=csv,
                     file_name="quantification_results.csv",
-                    mime="text/csv"
+                    mime="text/csv",
+                    use_container_width=True
                 )
-
-else:
-    st.info("👆 画像をアップロードしてください")
-    
-    st.markdown("---")
-    st.markdown("### ✨ v4.3 の特徴")
-    st.markdown("""
-    - **スマートハイブリッド方式**: バンドの強度に応じて自動で閾値を切り替え
-    - **濃いバンド**: 高閾値で精密に検出（緑色で表示）
-    - **薄いバンド**: 低閾値で広めに検出（黄色で表示）
-    - **パラメータ調整**: サイドバーで閾値を細かく調整可能
-    """)
