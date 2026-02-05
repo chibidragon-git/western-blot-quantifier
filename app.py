@@ -18,12 +18,12 @@ def apply_custom_css():
     <style>
     /* メインコンテナ */
     .stApp {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
     }
     
     /* ヘッダー */
     .main-header {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(90deg, #22d3ee 0%, #34d399 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-size: 2.5rem;
@@ -72,20 +72,20 @@ def apply_custom_css():
     
     /* ボタン */
     .stButton > button {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        color: white;
+        background: linear-gradient(90deg, #22d3ee 0%, #34d399 100%);
+        color: #0f172a;
         border: none;
         border-radius: 12px;
         padding: 0.75rem 2rem;
         font-weight: 600;
         font-size: 1rem;
         transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        box-shadow: 0 4px 15px rgba(34, 211, 238, 0.4);
     }
     
     .stButton > button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        box-shadow: 0 6px 20px rgba(34, 211, 238, 0.6);
     }
     
     /* ファイルアップローダー */
@@ -93,11 +93,11 @@ def apply_custom_css():
         background: rgba(255, 255, 255, 0.05);
         border-radius: 16px;
         padding: 2rem;
-        border: 2px dashed rgba(102, 126, 234, 0.5);
+        border: 2px dashed rgba(34, 211, 238, 0.5);
     }
     
     [data-testid="stFileUploader"]:hover {
-        border-color: rgba(102, 126, 234, 0.8);
+        border-color: rgba(34, 211, 238, 0.8);
         background: rgba(255, 255, 255, 0.08);
     }
     
@@ -121,15 +121,15 @@ def apply_custom_css():
     }
     
     [data-testid="stMetricValue"] {
-        color: #667eea;
+        color: #22d3ee;
         font-weight: 700;
     }
     
     /* 成功/エラーメッセージ */
     .stSuccess, .stInfo {
-        background: rgba(102, 126, 234, 0.2);
+        background: rgba(34, 211, 238, 0.2);
         border-radius: 12px;
-        border: 1px solid rgba(102, 126, 234, 0.3);
+        border: 1px solid rgba(34, 211, 238, 0.3);
     }
     
     /* 特徴カード */
@@ -138,11 +138,11 @@ def apply_custom_css():
         border-radius: 12px;
         padding: 1rem;
         margin: 0.5rem 0;
-        border-left: 3px solid #667eea;
+        border-left: 3px solid #22d3ee;
     }
     
     .feature-title {
-        color: #667eea;
+        color: #22d3ee;
         font-weight: 600;
         margin-bottom: 0.3rem;
     }
@@ -317,7 +317,7 @@ def create_plot(df):
     axes[1].set_xlabel('Lane', color='#a0aec0', fontsize=11)
     axes[1].set_ylabel('Relative %', color='#a0aec0', fontsize=11)
     axes[1].set_ylim(0, 120)
-    axes[1].axhline(y=100, color='#667eea', linestyle='--', alpha=0.7, linewidth=2)
+    axes[1].axhline(y=100, color='#22d3ee', linestyle='--', alpha=0.7, linewidth=2)
     axes[1].grid(axis='y', alpha=0.2, color='#4a5568')
     
     for bar, rel in zip(bars2, df['Relative_%']):
@@ -342,26 +342,26 @@ st.set_page_config(
 apply_custom_css()
 
 # ヘッダー
-st.markdown('<h1 class="main-header">🧬 Western Blot Quantifier</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Smart Hybrid Detection • Automatic Band Recognition</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">🧬 Western Blot 定量ツール</h1>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">スマートハイブリッド検出 • バンド自動認識</p>', unsafe_allow_html=True)
 
 # サイドバー
 with st.sidebar:
-    st.markdown("## ⚙️ Settings")
+    st.markdown("## ⚙️ 設定")
     
-    st.markdown("### 🎚️ Threshold")
-    low_thresh = st.slider("Low (weak bands)", min_value=5, max_value=30, value=10)
-    high_thresh = st.slider("High (strong bands)", min_value=15, max_value=50, value=20)
-    weak_threshold = st.slider("Weak band cutoff", min_value=50, max_value=200, value=130)
+    st.markdown("### 🎚️ 閾値")
+    low_thresh = st.slider("低閾値（薄いバンド用）", min_value=5, max_value=30, value=10)
+    high_thresh = st.slider("高閾値（濃いバンド用）", min_value=15, max_value=50, value=20)
+    weak_threshold = st.slider("薄いバンド判定値", min_value=50, max_value=200, value=130)
     
-    st.markdown("### 🔧 Filter")
-    min_area = st.slider("Min area", min_value=50, max_value=500, value=100)
+    st.markdown("### 🔧 フィルター")
+    min_area = st.slider("最小面積", min_value=50, max_value=500, value=100)
     
     st.markdown("---")
-    st.markdown("### 🔗 Links")
+    st.markdown("### 🔗 リンク")
     st.markdown("[📦 GitHub](https://github.com/chibidragon-git/western-blot-quantifier)")
     st.markdown("---")
-    st.markdown("**v4.3** • Smart Hybrid")
+    st.markdown("**v4.3** • スマートハイブリッド")
 
 # メインエリア
 uploaded_file = st.file_uploader("", type=['png', 'jpg', 'jpeg', 'tif', 'tiff'], 
@@ -371,8 +371,8 @@ if uploaded_file is None:
     st.markdown("""
     <div style="text-align: center; padding: 3rem; color: #a0aec0;">
         <div style="font-size: 4rem; margin-bottom: 1rem;">📤</div>
-        <div style="font-size: 1.2rem; margin-bottom: 0.5rem;">Drop your Western Blot image here</div>
-        <div style="font-size: 0.9rem; color: #718096;">Supports PNG, JPG, TIFF</div>
+        <div style="font-size: 1.2rem; margin-bottom: 0.5rem;">Western Blot画像をここにドロップ</div>
+        <div style="font-size: 0.9rem; color: #718096;">PNG, JPG, TIFF対応</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -383,24 +383,24 @@ if uploaded_file is None:
     with col1:
         st.markdown("""
         <div class="feature-card">
-            <div class="feature-title">🎯 Smart Detection</div>
-            <div class="feature-desc">Automatically adjusts threshold based on band intensity</div>
+            <div class="feature-title">🎯 スマート検出</div>
+            <div class="feature-desc">バンドの濃さに応じて自動で閾値を調整</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col2:
         st.markdown("""
         <div class="feature-card">
-            <div class="feature-title">⚡ Hybrid Mode</div>
-            <div class="feature-desc">Strong bands: tight ROI • Weak bands: wider ROI</div>
+            <div class="feature-title">⚡ ハイブリッドモード</div>
+            <div class="feature-desc">濃いバンド：タイトROI • 薄いバンド：広めROI</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col3:
         st.markdown("""
         <div class="feature-card">
-            <div class="feature-title">📊 Full Analysis</div>
-            <div class="feature-desc">Volume, relative intensity, and CSV export</div>
+            <div class="feature-title">📊 フル解析</div>
+            <div class="feature-desc">Volume、相対強度、CSVエクスポート</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -411,43 +411,43 @@ else:
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown('<div class="card-title">📷 Original Image</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">📷 元画像</div>', unsafe_allow_html=True)
         st.image(uploaded_file, use_container_width=True)
-        st.caption(f"Size: {w} × {h} px")
+        st.caption(f"サイズ: {w} × {h} px")
     
     with col2:
-        st.markdown('<div class="card-title">🎯 Detection Result</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">🎯 検出結果</div>', unsafe_allow_html=True)
         result_placeholder = st.empty()
         result_placeholder.markdown("""
         <div style="display: flex; align-items: center; justify-content: center; 
                     height: 200px; color: #718096; font-style: italic;">
-            Click "Analyze" to detect bands
+            「解析」をクリックしてバンドを検出
         </div>
         """, unsafe_allow_html=True)
     
-    if st.button("🔬 Analyze", type="primary", use_container_width=True):
-        with st.spinner("Processing..."):
+    if st.button("🔬 解析", type="primary", use_container_width=True):
+        with st.spinner("処理中..."):
             bands = detect_bands_smart(gray, low_thresh, high_thresh, weak_threshold, min_area)
             
             if len(bands) == 0:
-                st.error("❌ No bands detected. Try adjusting the thresholds.")
+                st.error("❌ バンドが検出されませんでした。閾値を調整してください。")
             else:
                 results = []
                 for i, band in enumerate(bands):
                     results.append({
-                        'Lane': i + 1,
+                        'レーン': i + 1,
                         'X': band['x'],
                         'Y': band['y'],
-                        'Width': band['width'],
-                        'Height': band['height'],
+                        '幅': band['width'],
+                        '高さ': band['height'],
                         'Volume': round(band['volume'], 0),
-                        'Mean': round(band['mean'], 2),
-                        'Type': '🟡 Weak' if band['strength'] == 'weak' else '🟢 Strong',
+                        '平均強度': round(band['mean'], 2),
+                        'タイプ': '🟡 薄' if band['strength'] == 'weak' else '🟢 濃',
                     })
                 
                 df = pd.DataFrame(results)
                 max_volume = df['Volume'].max()
-                df['Relative_%'] = (df['Volume'] / max_volume * 100).round(2) if max_volume > 0 else 0
+                df['相対値_%'] = (df['Volume'] / max_volume * 100).round(2) if max_volume > 0 else 0
                 
                 overlay = create_overlay(img, bands)
                 overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
@@ -459,25 +459,25 @@ else:
                     
                     st.markdown(f"""
                     <div style="text-align: center; margin-top: 0.5rem;">
-                        <span class="result-badge badge-strong">🟢 Strong: {strong_count}</span>
-                        <span class="result-badge badge-weak">🟡 Weak: {weak_count}</span>
+                        <span class="result-badge badge-strong">🟢 濃: {strong_count}</span>
+                        <span class="result-badge badge-weak">🟡 薄: {weak_count}</span>
                     </div>
                     """, unsafe_allow_html=True)
                 
                 st.markdown("---")
                 
-                st.markdown('<div class="card-title">📊 Quantification Results</div>', unsafe_allow_html=True)
+                st.markdown('<div class="card-title">📊 定量結果</div>', unsafe_allow_html=True)
                 fig = create_plot(df)
                 st.pyplot(fig)
                 
                 st.markdown("---")
                 
-                st.markdown('<div class="card-title">📋 Data Table</div>', unsafe_allow_html=True)
+                st.markdown('<div class="card-title">📋 データ</div>', unsafe_allow_html=True)
                 st.dataframe(df, use_container_width=True, hide_index=True)
                 
                 csv = df.to_csv(index=False).encode('utf-8-sig')
                 st.download_button(
-                    label="📥 Download CSV",
+                    label="📥 CSVダウンロード",
                     data=csv,
                     file_name="quantification_results.csv",
                     mime="text/csv",
