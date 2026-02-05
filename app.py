@@ -65,8 +65,8 @@ def find_band_region(gray):
     while bottom < h - 1 and inverted[bottom] > threshold:
         bottom += 1
     
-    # 余裕を持たせる（バンド幅の50%）
-    margin = max(5, (bottom - top) // 2)
+    # 小さめのマージン（バンド幅の20%）
+    margin = max(3, (bottom - top) // 5)
     top = max(0, top - margin)
     bottom = min(h - 1, bottom + margin)
     
