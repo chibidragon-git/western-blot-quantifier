@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Western Blot Quantifier v4.0 - Web App
-改良版: 固定バンド領域 + ローカル背景補正
+Western Blot Quantifier v4.1 - Web App
+改良版: レーンごとのバンド検出（スマイリング対応）
 """
 
 import streamlit as st
@@ -29,54 +29,31 @@ def load_image(uploaded_file):
     return img_bgr, gray
 
 
-def find_band_region(gray):
-    """画像全体からバンド領域のY範囲を検出"""
-    h, w = gray.shape
+def detect_band_in_lane(lane_gray, roi_half=20):
+    """各レーンでバンド位置を検出"""
+    h, w = lane_gray.shape
     
     # 縦方向プロファイル
-    profile = np.mean(gray, axis=1)
-    smoothed = gaussian_filter1d(profile, sigma=1.5)
+    prof = np.mean(lane_gray, axis=1)
+    smoothed = gaussian_filter1d(prof, sigma=2)
+    bg = np.percentile(smoothed, 90)
+    inv = np.maximum(bg - smoothed, 0)
     
-    # 背景値を推定（最も明るい部分）
-    bg_val = np.percentile(smoothed, 95)
-    
-    # 反転プロファイル（バンドがピークになる）
-    inverted = bg_val - smoothed
-    inverted = np.maximum(inverted, 0)
-    
-    if inverted.max() < 1:
-        # バンドが検出できない場合は中央を返す
+    if inv.max() < 3:
         return h // 4, 3 * h // 4
     
-    # 最も強いバンド位置
-    peak = np.argmax(inverted)
-    peak_val = inverted[peak]
+    # ピーク位置
+    pk = np.argmax(inv)
     
-    # バンド領域の閾値（ピーク値の30%）
-    threshold = peak_val * 0.3
-    
-    # 上端を探す
-    top = peak
-    while top > 0 and inverted[top] > threshold:
-        top -= 1
-    
-    # 下端を探す
-    bottom = peak
-    while bottom < h - 1 and inverted[bottom] > threshold:
-        bottom += 1
-    
-    # 小さめのマージン（バンド幅の20%）
-    margin = max(3, (bottom - top) // 5)
-    top = max(0, top - margin)
-    bottom = min(h - 1, bottom + margin)
+    # ROI範囲
+    top = max(0, pk - roi_half)
+    bottom = min(h - 1, pk + roi_half)
     
     return top, bottom
 
 
 def measure_lane(lane_gray, band_top, band_bottom):
     """レーンの強度を測定"""
-    h, w = lane_gray.shape
-    
     # バンド領域を切り出し
     band_region = lane_gray[band_top:band_bottom, :]
     
@@ -93,13 +70,10 @@ def measure_lane(lane_gray, band_top, band_bottom):
     return volume, mean_intensity
 
 
-def process_image(img, gray, num_lanes, exclude_last=False):
+def process_image(img, gray, num_lanes, exclude_last=False, roi_half=20):
     """画像を処理"""
     h, w = gray.shape
     lane_width = w // num_lanes
-    
-    # バンド領域を検出
-    band_top, band_bottom = find_band_region(gray)
     
     results = []
     lane_data = []
@@ -110,44 +84,47 @@ def process_image(img, gray, num_lanes, exclude_last=False):
         x_start = i * lane_width
         x_end = (i + 1) * lane_width if i < num_lanes - 1 else w
         
+        # レーン画像を切り出し
         lane_gray = gray[:, x_start:x_end]
-        volume, mean_int = measure_lane(lane_gray, band_top, band_bottom)
+        
+        # このレーンでバンド位置を検出
+        band_top, band_bottom = detect_band_in_lane(lane_gray, roi_half)
+        
+        # 強度を測定
+        volume, mean_intensity = measure_lane(lane_gray, band_top, band_bottom)
         
         results.append({
             'Lane': i + 1,
             'Volume': round(volume, 0),
-            'Mean': round(mean_int, 2),
+            'Mean': round(mean_intensity, 2),
         })
         
         lane_data.append({
             'x_start': x_start,
             'x_end': x_end,
+            'top': band_top,
+            'bottom': band_bottom,
         })
     
-    return results, lane_data, band_top, band_bottom
+    return results, lane_data
 
 
-def create_overlay(img, gray, lane_data, num_lanes, band_top, band_bottom):
+def create_overlay(img, gray, lane_data, num_lanes):
     """検出結果のオーバーレイを作成"""
     h, w = gray.shape
     lane_width = w // num_lanes
     
     overlay = img.copy()
     
-    # バンド領域の横線
-    cv2.line(overlay, (0, band_top), (w, band_top), (0, 255, 0), 1)
-    cv2.line(overlay, (0, band_bottom), (w, band_bottom), (0, 255, 0), 1)
-    
     # レーン境界線
     for i in range(num_lanes + 1):
         x = i * lane_width
-        cv2.line(overlay, (x, 0), (x, h), (255, 0, 0), 1)
+        cv2.line(overlay, (x, 0), (x, h), (255, 100, 100), 1)
     
-    # レーン番号とROI
+    # 各レーンのROI
     for i, ld in enumerate(lane_data):
-        # ROI矩形
-        pt1 = (ld['x_start'] + 2, band_top)
-        pt2 = (ld['x_end'] - 2, band_bottom)
+        pt1 = (ld['x_start'] + 2, ld['top'])
+        pt2 = (ld['x_end'] - 2, ld['bottom'])
         cv2.rectangle(overlay, pt1, pt2, (0, 255, 0), 2)
         
         cx = (ld['x_start'] + ld['x_end']) // 2
@@ -163,14 +140,12 @@ def create_plot(df):
     
     colors = plt.cm.viridis(df['Relative_%'] / 100)
     
-    # Volume
     axes[0].bar(df['Lane'], df['Volume'], color=colors, edgecolor='black')
     axes[0].set_title('Band Volume', fontweight='bold')
     axes[0].set_xlabel('Lane')
     axes[0].set_ylabel('Volume')
     axes[0].grid(axis='y', alpha=0.3)
     
-    # Relative %
     bars = axes[1].bar(df['Lane'], df['Relative_%'], color=colors, edgecolor='black')
     axes[1].set_title('Relative Intensity (%)', fontweight='bold')
     axes[1].set_xlabel('Lane')
@@ -181,7 +156,7 @@ def create_plot(df):
     
     for bar, rel in zip(bars, df['Relative_%']):
         axes[1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
-                    f'{rel:.1f}%', ha='center', va='bottom', fontsize=8)
+                    f'{rel:.1f}%', ha='center', va='bottom', fontsize=8, fontweight='bold')
     
     plt.tight_layout()
     return fig
@@ -197,31 +172,17 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🧬 Western Blot Quantifier")
-st.markdown("バンド自動検出 + ローカル背景補正")
+st.title("🧬 Western Blot Quantifier v4.1")
+st.markdown("レーンごとのバンド自動検出（スマイリング対応）")
 
 # サイドバー
 with st.sidebar:
     st.header("⚙️ 設定")
     
     num_lanes = st.number_input("レーン数", min_value=1, max_value=30, value=12)
-    exclude_last = st.checkbox("最後のレーン（マーカー）を除外")
-    
-    st.markdown("---")
-    st.markdown("### 📖 使い方")
-    st.markdown("""
-    1. 画像をアップロード
-    2. レーン数を設定
-    3. 「定量化」ボタンをクリック
-    """)
-    
-    st.markdown("---")
-    st.markdown("### ℹ️ アルゴリズム")
-    st.markdown("""
-    - バンド領域を自動検出
-    - 各レーンで背景補正
-    - 強度を積分してVolume計算
-    """)
+    exclude_last = st.checkbox("最後のレーン（マーカー）を除外", value=False)
+    roi_half = st.slider("ROI半径", min_value=10, max_value=50, value=20, 
+                         help="バンド中心から上下に何ピクセル含めるか")
     
     st.markdown("---")
     st.markdown("### 📎 リンク")
@@ -232,43 +193,40 @@ uploaded_file = st.file_uploader("画像をアップロード", type=['png', 'jp
 
 if uploaded_file is not None:
     img, gray = load_image(uploaded_file)
+    h, w = gray.shape
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("📷 元画像")
         st.image(uploaded_file, use_container_width=True)
+        st.caption(f"サイズ: {w} x {h}")
     
     if st.button("🔬 定量化を実行", type="primary", use_container_width=True):
         with st.spinner("処理中..."):
-            results, lane_data, band_top, band_bottom = process_image(
-                img, gray, num_lanes, exclude_last
-            )
+            results, lane_data = process_image(img, gray, num_lanes, exclude_last, roi_half)
             
             df = pd.DataFrame(results)
             max_volume = df['Volume'].max()
             df['Relative_%'] = (df['Volume'] / max_volume * 100).round(2) if max_volume > 0 else 0
             
-            overlay = create_overlay(img, gray, lane_data, num_lanes, band_top, band_bottom)
+            overlay = create_overlay(img, gray, lane_data, num_lanes)
             overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
         
         with col2:
             st.subheader("🎯 検出結果")
             st.image(overlay_rgb, use_container_width=True)
-            st.caption(f"バンド領域: Y = {band_top} ~ {band_bottom}")
+            st.caption("各レーンで個別にバンドを検出")
         
         st.markdown("---")
         
-        # グラフ
         st.subheader("📊 定量結果")
         fig = create_plot(df)
         st.pyplot(fig)
         
-        # データテーブル
         st.subheader("📋 データ")
         st.dataframe(df, use_container_width=True)
         
-        # CSVダウンロード
         csv = df.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             label="📥 CSVをダウンロード",
@@ -281,18 +239,9 @@ else:
     st.info("👆 画像をアップロードしてください")
     
     st.markdown("---")
-    st.markdown("### ✨ 特徴")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("#### 🎯 自動検出")
-        st.markdown("バンド領域を自動で検出")
-    
-    with col2:
-        st.markdown("#### 📊 即座に結果")
-        st.markdown("グラフとCSVで定量結果を出力")
-    
-    with col3:
-        st.markdown("#### 🔒 プライバシー")
-        st.markdown("データはサーバーに保存されません")
+    st.markdown("### ✨ v4.1 の特徴")
+    st.markdown("""
+    - **レーンごとのバンド検出**: スマイリング効果に対応
+    - **ローカル背景補正**: 各レーンで背景を個別に計算
+    - **ROI半径調整**: サイドバーで調整可能
+    """)
