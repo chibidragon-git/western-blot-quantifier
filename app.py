@@ -23,9 +23,7 @@ def apply_custom_css():
     
     /* ヘッダー */
     .main-header {
-        background: linear-gradient(90deg, #22d3ee 0%, #34d399 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #ffffff;
         font-size: 2.5rem;
         font-weight: 800;
         text-align: center;
@@ -34,7 +32,7 @@ def apply_custom_css():
     }
     
     .sub-header {
-        color: #a0aec0;
+        color: #cbd5e1;
         text-align: center;
         font-size: 1rem;
         margin-bottom: 2rem;
@@ -52,7 +50,7 @@ def apply_custom_css():
     }
     
     .card-title {
-        color: #e2e8f0;
+        color: #ffffff;
         font-size: 1.2rem;
         font-weight: 600;
         margin-bottom: 1rem;
@@ -67,7 +65,7 @@ def apply_custom_css():
     }
     
     [data-testid="stSidebar"] .stMarkdown {
-        color: #e2e8f0;
+        color: #ffffff;
     }
     
     /* ボタン */
@@ -142,13 +140,13 @@ def apply_custom_css():
     }
     
     .feature-title {
-        color: #22d3ee;
+        color: #ffffff;
         font-weight: 600;
         margin-bottom: 0.3rem;
     }
     
     .feature-desc {
-        color: #a0aec0;
+        color: #cbd5e1;
         font-size: 0.9rem;
     }
     
