@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Western Blot Quantifier v4.3 - Web App
-スマートハイブリッド方式：濃いバンドは高閾値、薄いバンドは低閾値で検出
+Western Blot Quantifier v4.4 - Web App
+水平プロファイル・ピーク検出方式：バンド位置を正確に特定
 """
 
 import streamlit as st
@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
+from scipy import signal, ndimage
 
 # カスタムCSS（ダークテーマ + 白文字）
 def apply_custom_css():
@@ -85,19 +86,14 @@ def apply_custom_css():
     
     /* ファイルアップローダー */
     [data-testid="stFileUploader"] {
-        background: #1e293b;
+        background: white;
         border-radius: 16px;
         padding: 2rem;
         border: 2px dashed #0ea5e9;
     }
     
-    /* アップローダー内の文字は暗い色に */
     [data-testid="stFileUploader"] * {
         color: #1e293b !important;
-    }
-    
-    [data-testid="stFileUploader"] {
-        background: white;
     }
     
     /* 特徴カード */
@@ -150,7 +146,6 @@ def apply_custom_css():
         color: white !important;
     }
     
-    /* スライダーラベル強制 */
     [data-testid="stSlider"] label {
         color: white !important;
     }
@@ -190,87 +185,166 @@ def load_image(uploaded_file):
     return img_bgr, gray
 
 
-def detect_bands_smart(gray, low_thresh=10, high_thresh=20, weak_threshold=130, min_area=100):
-    """スマートハイブリッド方式でバンドを検出"""
+def detect_bands_peak(gray, sensitivity=0.3, min_band_width=10, merge_distance=15):
+    """
+    水平プロファイル・ピーク検出方式
+    
+    1. 画像を反転（バンドが暗い→明るいピークに）
+    2. 水平方向に投影（各列の平均強度）
+    3. ピーク検出でバンドのX位置を特定
+    4. 各ピーク周辺で垂直プロファイルからY範囲を決定
+    """
     h, w = gray.shape
     
+    # 背景推定と反転
     bg = np.percentile(gray, 90)
-    inverted = np.maximum(0, bg - gray.astype(np.float64)).astype(np.uint8)
+    inverted = np.maximum(0, bg - gray.astype(np.float64))
     
-    kernel = np.ones((3, 3), np.uint8)
+    # ノイズ除去
+    inverted_smooth = cv2.GaussianBlur(inverted.astype(np.float32), (5, 5), 0)
     
-    # 低閾値で全バンド検出
-    _, binary_low = cv2.threshold(inverted, low_thresh, 255, cv2.THRESH_BINARY)
-    binary_low = cv2.morphologyEx(binary_low, cv2.MORPH_OPEN, kernel)
-    binary_low = cv2.morphologyEx(binary_low, cv2.MORPH_CLOSE, kernel)
-    contours_low, _ = cv2.findContours(binary_low, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # 水平プロファイル：各列の平均強度
+    h_profile = np.mean(inverted_smooth, axis=0)
     
-    # 高閾値で検出
-    _, binary_high = cv2.threshold(inverted, high_thresh, 255, cv2.THRESH_BINARY)
-    binary_high = cv2.morphologyEx(binary_high, cv2.MORPH_OPEN, kernel)
-    binary_high = cv2.morphologyEx(binary_high, cv2.MORPH_CLOSE, kernel)
-    contours_high, _ = cv2.findContours(binary_high, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # プロファイルをスムージング
+    if len(h_profile) > 20:
+        window = min(15, len(h_profile) // 4)
+        if window % 2 == 0:
+            window += 1
+        if window >= 3:
+            h_profile_smooth = signal.savgol_filter(h_profile, window, 2)
+        else:
+            h_profile_smooth = h_profile
+    else:
+        h_profile_smooth = h_profile
     
-    # 高閾値のバンド情報をdict化
-    high_bands = {}
-    for cnt in contours_high:
-        x, y, cw, ch = cv2.boundingRect(cnt)
-        area = cv2.contourArea(cnt)
-        if area > min_area:
-            high_bands[x] = (x, y, cw, ch, area, cnt)
+    # ピーク検出
+    max_val = np.max(h_profile_smooth)
+    if max_val == 0:
+        return []
     
-    # 各バンドを処理
+    prominence = max_val * sensitivity
+    peaks, properties = signal.find_peaks(
+        h_profile_smooth,
+        prominence=prominence,
+        width=min_band_width // 2,
+        distance=min_band_width
+    )
+    
+    if len(peaks) == 0:
+        return []
+    
+    # 各ピークからバンドのバウンディングボックスを決定
     bands = []
     
-    for cnt in contours_low:
-        x, y, cw, ch = cv2.boundingRect(cnt)
-        area = cv2.contourArea(cnt)
-        if area > min_area:
-            band_region = inverted[y:y+ch, x:x+cw]
-            max_val = band_region.max()
-            
-            # 強度に基づいて判定
-            is_weak = max_val < weak_threshold
-            
-            if is_weak:
-                local_bg = np.percentile(band_region, 90)
-                inv_region = np.maximum(0, local_bg - band_region.astype(np.float64))
-                volume = np.sum(inv_region)
-                mean_intensity = np.mean(inv_region)
-                bands.append({
-                    'x': x, 'y': y, 'width': cw, 'height': ch,
-                    'area': area, 'volume': volume, 'mean': mean_intensity,
-                    'strength': 'weak', 'contour': cnt
-                })
-            else:
-                found = False
-                for hx, (hx2, hy, hw, hh, ha, hcnt) in high_bands.items():
-                    if abs(x - hx) < 30:
-                        hband_region = inverted[hy:hy+hh, hx2:hx2+hw]
-                        local_bg = np.percentile(hband_region, 90)
-                        inv_region = np.maximum(0, local_bg - hband_region.astype(np.float64))
-                        volume = np.sum(inv_region)
-                        mean_intensity = np.mean(inv_region)
-                        bands.append({
-                            'x': hx2, 'y': hy, 'width': hw, 'height': hh,
-                            'area': ha, 'volume': volume, 'mean': mean_intensity,
-                            'strength': 'strong', 'contour': hcnt
-                        })
-                        found = True
-                        break
-                if not found:
-                    local_bg = np.percentile(band_region, 90)
-                    inv_region = np.maximum(0, local_bg - band_region.astype(np.float64))
-                    volume = np.sum(inv_region)
-                    mean_intensity = np.mean(inv_region)
-                    bands.append({
-                        'x': x, 'y': y, 'width': cw, 'height': ch,
-                        'area': area, 'volume': volume, 'mean': mean_intensity,
-                        'strength': 'weak', 'contour': cnt
-                    })
+    for peak_x in peaks:
+        # ピーク周辺の幅を決定（半値幅ベース）
+        peak_height = h_profile_smooth[peak_x]
+        half_height = peak_height * 0.3
+        
+        # 左端を探す
+        left = peak_x
+        while left > 0 and h_profile_smooth[left] > half_height:
+            left -= 1
+        
+        # 右端を探す
+        right = peak_x
+        while right < w - 1 and h_profile_smooth[right] > half_height:
+            right += 1
+        
+        band_width = right - left
+        if band_width < min_band_width:
+            # 最小幅を確保
+            center = (left + right) // 2
+            left = max(0, center - min_band_width // 2)
+            right = min(w - 1, center + min_band_width // 2)
+            band_width = right - left
+        
+        # バンド領域の垂直プロファイルからY範囲を決定
+        band_column = inverted_smooth[:, left:right]
+        v_profile = np.mean(band_column, axis=1)
+        
+        # 垂直方向のピーク検出
+        v_max = np.max(v_profile)
+        if v_max == 0:
+            continue
+        
+        v_half = v_max * 0.2
+        
+        # 上端を探す
+        top = np.argmax(v_profile > v_half)
+        # 下端を探す
+        bottom = h - 1 - np.argmax(v_profile[::-1] > v_half)
+        
+        # マージンを追加
+        margin_y = max(3, (bottom - top) // 8)
+        margin_x = max(2, band_width // 8)
+        top = max(0, top - margin_y)
+        bottom = min(h - 1, bottom + margin_y)
+        left = max(0, left - margin_x)
+        right = min(w - 1, right + margin_x)
+        
+        band_width = right - left
+        band_height = bottom - top
+        
+        if band_width < 5 or band_height < 5:
+            continue
+        
+        # 定量計算
+        band_region = inverted[top:bottom, left:right]
+        volume = np.sum(band_region)
+        mean_intensity = np.mean(band_region)
+        max_intensity = np.max(band_region)
+        
+        bands.append({
+            'x': left,
+            'y': top,
+            'width': band_width,
+            'height': band_height,
+            'peak_x': peak_x,
+            'volume': volume,
+            'mean': mean_intensity,
+            'max_intensity': max_intensity,
+            'strength': 'strong' if max_intensity > 30 else 'weak',
+        })
     
-    bands.sort(key=lambda b: b['x'])
-    return bands
+    # 近すぎるバンドをマージ
+    merged = []
+    used = set()
+    for i, b1 in enumerate(bands):
+        if i in used:
+            continue
+        group = [b1]
+        for j, b2 in enumerate(bands):
+            if j <= i or j in used:
+                continue
+            if abs(b1['peak_x'] - b2['peak_x']) < merge_distance:
+                group.append(b2)
+                used.add(j)
+        
+        # グループの中で最もvolumeが大きいものを採用
+        best = max(group, key=lambda b: b['volume'])
+        # ただし範囲は全グループを包含
+        x_min = min(b['x'] for b in group)
+        y_min = min(b['y'] for b in group)
+        x_max = max(b['x'] + b['width'] for b in group)
+        y_max = max(b['y'] + b['height'] for b in group)
+        
+        best['x'] = x_min
+        best['y'] = y_min
+        best['width'] = x_max - x_min
+        best['height'] = y_max - y_min
+        
+        # 再計算
+        band_region = inverted[y_min:y_max, x_min:x_max]
+        best['volume'] = np.sum(band_region)
+        best['mean'] = np.mean(band_region)
+        
+        merged.append(best)
+        used.add(i)
+    
+    merged.sort(key=lambda b: b['x'])
+    return merged
 
 
 def create_overlay(img, bands):
@@ -281,10 +355,53 @@ def create_overlay(img, bands):
         x, y, w, h = band['x'], band['y'], band['width'], band['height']
         color = (0, 255, 0) if band['strength'] == 'strong' else (0, 255, 255)
         cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 2)
-        cv2.putText(overlay, str(i + 1), (x + w // 2 - 5, y - 5),
+        
+        # ラベル位置の調整
+        label_y = max(15, y - 5)
+        cv2.putText(overlay, str(i + 1), (x + w // 2 - 5, label_y),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
     
     return overlay
+
+
+def create_profile_plot(gray, bands):
+    """水平プロファイルとピーク位置を可視化"""
+    h, w = gray.shape
+    bg = np.percentile(gray, 90)
+    inverted = np.maximum(0, bg - gray.astype(np.float64))
+    inverted_smooth = cv2.GaussianBlur(inverted.astype(np.float32), (5, 5), 0)
+    h_profile = np.mean(inverted_smooth, axis=0)
+    
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(14, 3))
+    fig.patch.set_facecolor('#0f172a')
+    ax.set_facecolor('#0f172a')
+    
+    ax.plot(h_profile, color='#0ea5e9', linewidth=1.5, alpha=0.8)
+    ax.fill_between(range(len(h_profile)), h_profile, alpha=0.2, color='#0ea5e9')
+    
+    for i, band in enumerate(bands):
+        peak_x = band['peak_x']
+        ax.axvline(x=peak_x, color='#10b981', linestyle='--', alpha=0.5)
+        ax.annotate(str(i+1), (peak_x, h_profile[peak_x]), 
+                   textcoords="offset points", xytext=(0, 10),
+                   ha='center', fontsize=9, fontweight='bold', color='#10b981')
+        
+        # バンド範囲をハイライト
+        ax.axvspan(band['x'], band['x'] + band['width'], alpha=0.1, color='#10b981')
+    
+    ax.set_title('水平プロファイル & ピーク検出', fontweight='bold', color='white', fontsize=12)
+    ax.set_xlabel('X position (px)', color='white')
+    ax.set_ylabel('Signal', color='white')
+    ax.tick_params(colors='white')
+    ax.spines['bottom'].set_color('#475569')
+    ax.spines['left'].set_color('#475569')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.grid(axis='y', alpha=0.2, color='#475569')
+    
+    plt.tight_layout()
+    return fig
 
 
 def create_plot(df):
@@ -343,23 +460,24 @@ apply_custom_css()
 
 # ヘッダー
 st.markdown('<h1 class="main-header">🧬 Western Blot 定量ツール</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">スマートハイブリッド検出 • バンド自動認識</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">ピーク検出方式 • バンド自動認識 • レーン数指定不要</p>', unsafe_allow_html=True)
 
 # サイドバー
 with st.sidebar:
     st.markdown("## ⚙️ 設定")
     
-    st.markdown("### 🎚️ 閾値")
-    low_thresh = st.slider("低閾値（薄いバンド用）", min_value=5, max_value=30, value=10,
-                           help="薄いバンドを検出するときの閾値。小さいほど薄いバンドも検出")
-    high_thresh = st.slider("高閾値（濃いバンド用）", min_value=15, max_value=50, value=20,
-                            help="濃いバンドを検出するときの閾値。大きいほどタイトに検出")
-    weak_threshold = st.slider("薄いバンド判定値", min_value=50, max_value=200, value=130,
-                               help="この値以下の強度のバンドを「薄いバンド」と判定")
+    st.markdown("### 🎚️ ピーク検出")
+    sensitivity = st.slider("検出感度", min_value=0.05, max_value=0.8, value=0.3, step=0.05,
+                            help="小さいほど薄いバンドも検出。大きいほど明確なバンドのみ")
+    min_band_width = st.slider("最小バンド幅 (px)", min_value=5, max_value=50, value=10,
+                               help="これより狭いピークは無視")
+    merge_distance = st.slider("マージ距離 (px)", min_value=5, max_value=50, value=15,
+                               help="この距離以内のピークは1つのバンドとして統合")
     
-    st.markdown("### 🔧 フィルター")
-    min_area = st.slider("最小面積", min_value=50, max_value=500, value=100,
-                         help="ノイズ除去。この面積以下の検出は除外")
+    st.markdown("---")
+    
+    show_profile = st.checkbox("📈 プロファイル表示", value=True,
+                               help="水平プロファイルとピーク位置を表示")
     
     st.markdown("---")
     
@@ -371,25 +489,26 @@ with st.sidebar:
         - PNG, JPG, TIFF対応
         
         **2. 「解析」をクリック**
-        - バンドを自動検出
+        - ピーク検出でバンド位置を自動特定
         - 緑枠 = 濃いバンド
         - 黄枠 = 薄いバンド
         
         **3. 結果を確認**
+        - プロファイルでピーク位置を確認
         - グラフで相対強度を確認
         - CSVでデータをダウンロード
         
         **💡 うまく検出されない場合**
-        - 薄いバンドが小さい → 低閾値を下げる
-        - 濃いバンドが大きすぎ → 高閾値を上げる
-        - ノイズが多い → 最小面積を上げる
+        - バンドが少ない → 感度を下げる (0.1-0.2)
+        - ノイズで誤検出 → 感度を上げる (0.4-0.6)
+        - バンドが分離しない → マージ距離を下げる
         """)
     
     st.markdown("---")
     st.markdown("### 🔗 リンク")
     st.markdown("[📦 GitHub](https://github.com/chibidragon-git/western-blot-quantifier)")
     st.markdown("---")
-    st.markdown("**v4.3** • スマートハイブリッド")
+    st.markdown("**v4.4** • ピーク検出方式")
 
 # メインエリア
 uploaded_file = st.file_uploader("", type=['png', 'jpg', 'jpeg', 'tif', 'tiff'], 
@@ -400,7 +519,7 @@ if uploaded_file is None:
     <div style="text-align: center; padding: 3rem;">
         <div style="font-size: 4rem; margin-bottom: 1rem;">📤</div>
         <div style="font-size: 1.2rem; margin-bottom: 0.5rem; color: white;">Western Blot画像をここにドロップ</div>
-        <div style="font-size: 0.9rem; color: #94a3b8;">PNG, JPG, TIFF対応</div>
+        <div style="font-size: 0.9rem; color: #94a3b8;">PNG, JPG, TIFF対応 • レーン数の指定は不要</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -411,16 +530,16 @@ if uploaded_file is None:
     with col1:
         st.markdown("""
         <div class="feature-card">
-            <div class="feature-title">🎯 スマート検出</div>
-            <div class="feature-desc">バンドの濃さに応じて自動で閾値を調整</div>
+            <div class="feature-title">🎯 ピーク検出</div>
+            <div class="feature-desc">水平プロファイルからバンド位置を正確に特定</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col2:
         st.markdown("""
         <div class="feature-card">
-            <div class="feature-title">⚡ ハイブリッドモード</div>
-            <div class="feature-desc">濃いバンド：タイトROI • 薄いバンド：広めROI</div>
+            <div class="feature-title">⚡ 全自動</div>
+            <div class="feature-desc">レーン数の指定不要。バンドを自動認識</div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -428,7 +547,7 @@ if uploaded_file is None:
         st.markdown("""
         <div class="feature-card">
             <div class="feature-title">📊 フル解析</div>
-            <div class="feature-desc">Volume、相対強度、CSVエクスポート</div>
+            <div class="feature-desc">Volume、相対強度、プロファイル可視化、CSV出力</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -454,11 +573,11 @@ else:
         """, unsafe_allow_html=True)
     
     if st.button("🔬 解析", type="primary", use_container_width=True):
-        with st.spinner("処理中..."):
-            bands = detect_bands_smart(gray, low_thresh, high_thresh, weak_threshold, min_area)
+        with st.spinner("ピーク検出中..."):
+            bands = detect_bands_peak(gray, sensitivity, min_band_width, merge_distance)
             
             if len(bands) == 0:
-                st.error("❌ バンドが検出されませんでした。閾値を調整してください。")
+                st.error("❌ バンドが検出されませんでした。感度を下げてみてください。")
             else:
                 results = []
                 for i, band in enumerate(bands):
@@ -489,10 +608,18 @@ else:
                     <div style="text-align: center; margin-top: 0.5rem;">
                         <span class="result-badge badge-strong">🟢 濃: {strong_count}</span>
                         <span class="result-badge badge-weak">🟡 薄: {weak_count}</span>
+                        <span class="result-badge" style="background: #6366f1;">📊 計: {len(bands)}</span>
                     </div>
                     """, unsafe_allow_html=True)
                 
                 st.markdown("---")
+                
+                # プロファイル表示
+                if show_profile:
+                    st.markdown('<div class="card-title">📈 水平プロファイル</div>', unsafe_allow_html=True)
+                    profile_fig = create_profile_plot(gray, bands)
+                    st.pyplot(profile_fig)
+                    st.markdown("---")
                 
                 st.markdown('<div class="card-title">📊 定量結果</div>', unsafe_allow_html=True)
                 fig = create_plot(df)
