@@ -12,3 +12,4 @@ __pycache__/
 Thumbs.db
 
 # Test outputs (keep test images for reference but ignore generated outputs)
+wb_test_clean.jpg
